@@ -26,5 +26,5 @@ El juego de las monedas escondidas (los chinos), online con amigos o en solitari
 - `logic.js` — lógica pura del juego (testeable con `node`)
 - `app.js` — interfaz + multijugador + IA local
 
-Tests: `node /tmp/test-chinchimoni.js` (lógica y simulación de partidas con las normas nuevas),
-`node /tmp/test-solo.js` (smoke test: partida completa en solitario con DOM simulado).
+Tests: `node tests/test-logic.js` (lógica y simulación de partidas con las normas vigentes),
+`node tests/test-solo.js` (smoke test: partida completa en solitario con DOM simulado).
