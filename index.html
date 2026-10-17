@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chinchimoni 🃏 — chinchón online con amigos</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="logic.js"></script>
+</head>
+<body>
+
+<!-- ============ PORTADA ============ -->
+<section id="screen-home" class="screen">
+  <div class="hero">
+    <div class="logo">🃏</div>
+    <h1>Chinchimoni</h1>
+    <p class="tagline">El chinchón de toda la vida, online con tus amigos.<br>Salas con código · hasta 12 jugadores.</p>
+  </div>
+  <div class="card-panel">
+    <label for="input-name">Tu nombre</label>
+    <input type="text" id="input-name" maxlength="12" placeholder="Ej: Mork" autocomplete="off">
+    <div class="row">
+      <button id="btn-create" class="btn btn-big">Crear sala</button>
+    </div>
+    <div class="divider">— o —</div>
+    <div class="row">
+      <input type="text" id="input-code" maxlength="4" placeholder="CÓDIGO" class="code-input" autocomplete="off" style="max-width:170px">
+      <button id="btn-join" class="btn btn-big">Unirse</button>
+    </div>
+    <p id="home-error" class="error"></p>
+  </div>
+  <details class="rules">
+    <summary>¿Cómo se juega?</summary>
+    <ul>
+      <li>Se reparten <b>7 cartas</b> a cada jugador con baraja española doble.</li>
+      <li>En tu turno <b>robas una carta</b> (del mazo o del descarte) y <b>descartas otra</b>.</li>
+      <li>Liga tus cartas en <b>tríos</b> (mismo número) o <b>escaleras</b> (mismo palo, correlativas; el as solo vale como 1).</li>
+      <li>Si tras robar puedes ligar las 7, <b>¡cierra!</b> <b>Chinchón</b> = escalera de 7 del mismo palo → <b>−25 puntos</b>.</li>
+      <li>Al cerrar, los demás cuentan los puntos de sus cartas sin ligar (las figuras valen 10).</li>
+      <li>Los puntos se acumulan: con <b>100 o más quedas eliminado</b>. Gana el último en pie.</li>
+      <li>🤫 Las cartas viajan por la sala: no cotillees la consola del navegador, tramposo.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ============ SALA DE ESPERA ============ -->
+<section id="screen-lobby" class="screen hidden" style="text-align:center">
+  <h2>Código de sala</h2>
+  <div><span id="lobby-code" class="code">····</span></div>
+  <div style="margin:10px 0"><button id="btn-copy" class="btn-small">📋 Copiar código</button></div>
+  <p id="lobby-note" class="muted"></p>
+  <ul id="lobby-players"></ul>
+  <p id="lobby-count" class="muted"></p>
+  <div class="row">
+    <button id="btn-start" class="btn btn-big hidden">🃏 Empezar partida</button>
+    <button id="btn-leave-lobby" class="btn-secondary">Salir</button>
+  </div>
+</section>
+
+<!-- ============ PARTIDA ============ -->
+<section id="screen-game" class="screen hidden">
+  <header class="game-header">
+    <div><strong id="game-round">Ronda 1</strong> · <span id="game-code" class="muted"></span></div>
+    <button id="btn-leave-game" class="btn-small">Salir</button>
+  </header>
+  <div id="turn-banner" class="banner">…</div>
+  <div id="opponents" class="opponents"></div>
+  <div id="table" class="table">
+    <div class="pila-wrap">
+      <div id="pile-stock" class="pila"><div class="dorso"></div><span id="stock-count" class="count">0</span><small>mazo</small></div>
+    </div>
+    <div class="pila-wrap">
+      <div id="pile-discard" class="pila"><small>descarte</small></div>
+    </div>
+  </div>
+  <div id="actions" class="actions"></div>
+  <div id="hand" class="hand"></div>
+  <details id="scoreboard" class="scoreboard">
+    <summary>🏆 Puntuación</summary>
+    <ul id="scores-list"></ul>
+  </details>
+</section>
+
+<div id="modal" class="hidden"><div id="modal-panel"></div></div>
+<div id="toast" class="hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
