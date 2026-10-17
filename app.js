@@ -22,15 +22,16 @@
   var SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqY3RobWdsbHRkcmVmd25mbHFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwODA5OTMsImV4cCI6MjEwNzY1Njk5M30.hWorZSMT1C5dMVXYAaR2_fuduVwit4uJ9qrPGXcBk7o';
 
   var L = Chinchimoni;
-  var AI_NAMES = ['Ada 🤖', 'Turing 🤖', 'Pepe Bot', 'Lola Bot', 'Curro Bot'];
+  var AI_NAMES = ['Ada', 'Turing', 'Pepe Bot', 'Lola Bot', 'Curro Bot'];
 
   // ---------- estado ----------
   var S = {
-    name: '', playerId: '', joinedAt: 0, roomCode: '',
+    name: '', playerId: '', joinedAt: 0, roomCode: '', photo: null,
     channel: null, sb: null, local: false,
     isHost: false, players: [],
     screen: 'home',
     selHide: null, selGuess: null, soloCount: 3,
+    stats: {}, // estadísticas de la partida: id -> {apuestas, aciertos, rondaSalvado}
     game: null,   // estado de la ronda
     host: null    // {hides:{}, guesses:{}, order:[], idx:0} solo anfitrión
   };
@@ -38,6 +39,11 @@
   // ---------- utilidades ----------
   function $(id) { return document.getElementById(id); }
   function randId() { return 'p' + Math.random().toString(36).slice(2, 10); }
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   function makeRoomCode() {
     var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', c = '';
     for (var i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
@@ -50,6 +56,38 @@
     if (text !== undefined && text !== null) d.textContent = text;
     return d;
   }
+
+  // ---------- iconos SVG modernos (en vez de emojis básicos) ----------
+  var ICON_PATHS = {
+    fist: '<path d="M7 12V7.2a1.5 1.5 0 0 1 3 0V11"/><path d="M10 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M13 11V7.2a1.5 1.5 0 0 1 3 0V13"/><path d="M7 12a2 2 0 0 1-2-2V8.6A1.6 1.6 0 0 1 8.2 8.6"/><path d="M7 12v5a4 4 0 0 0 4 4h2.5a4 4 0 0 0 4-4v-4a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2z"/>',
+    target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
+    coins: '<ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/><path d="M5 11.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
+    trophy: '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5.5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5C3 10 5 12 7.5 12"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5C21 10 19 12 16.5 12"/>',
+    bot: '<rect x="4.5" y="9" width="15" height="10" rx="2.5"/><path d="M12 9V4.5"/><circle cx="12" cy="3.5" r="1" fill="currentColor" stroke="none"/><circle cx="9.3" cy="14" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.7" cy="14" r="1.1" fill="currentColor" stroke="none"/><path d="M9.5 17h5"/>',
+    chart: '<path d="M3 21h18"/><path d="M7 21v-6"/><path d="M12 21V8"/><path d="M17 21v-9"/>',
+    camera: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><circle cx="12" cy="13.5" r="3.2"/><path d="M8.5 7.5L10 4.5h4l1.5 3"/>',
+    eye: '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>',
+    play: '<path d="M7 4.5l12.5 7.5L7 19.5z"/>',
+    users: '<circle cx="9" cy="8" r="3.4"/><path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0"/><path d="M15.5 4.9a3.4 3.4 0 0 1 0 6.2"/><path d="M17.8 13.7a6.2 6.2 0 0 1 3.4 5.8"/>',
+    think: '<path d="M21 11.5a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.4-.3-3.4-.8L4 19.5l1.3-2.6A7.5 7.5 0 1 1 21 11.5z"/><circle cx="9" cy="11.5" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="11.5" r="1" fill="currentColor" stroke="none"/><circle cx="17" cy="11.5" r="1" fill="currentColor" stroke="none"/>',
+    medal: '<circle cx="12" cy="14.5" r="4.5"/><path d="M9.2 10.8L6.5 3.5h3.8l1.7 3.6 1.7-3.6h3.8l-2.7 7.3"/>',
+    crown: '<path d="M3 8.5l3.8 3.2L12 5.5l5.2 6.2L21 8.5l-1.6 9H4.6z"/>',
+    frown: '<circle cx="12" cy="12" r="9"/><path d="M8.5 16.5s1.4-2.6 3.5-2.6 3.5 2.6 3.5 2.6"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>'
+  };
+  function icon(n) {
+    return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+      ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      (ICON_PATHS[n] || '') + '</svg>';
+  }
+  // Botón con icono + etiqueta (la etiqueta queda en un span para localizarla).
+  function btnIcon(label, iconName, cls) {
+    var b = el('button', null, cls);
+    b.innerHTML = icon(iconName) + '<span>' + label + '</span>';
+    return b;
+  }
   function showScreen(name) {
     S.screen = name;
     ['home', 'lobby', 'game'].forEach(function (s) {
@@ -57,9 +95,9 @@
     });
   }
   var toastTimer = null;
-  function toast(msg, ms) {
+  function toast(html, ms) {
     var t = $('toast');
-    t.textContent = msg;
+    t.innerHTML = html;
     t.classList.remove('hidden');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 2600);
@@ -139,7 +177,57 @@
   try {
     var saved = localStorage.getItem('chinchimoni-name');
     if (saved) $('input-name').value = saved;
+    S.photo = localStorage.getItem('chinchimoni-photo') || null;
+    renderPhotoPreview();
   } catch (e) {}
+
+  // ---------- foto de perfil ----------
+  function renderPhotoPreview() {
+    var pv = $('photo-preview');
+    if (S.photo) {
+      pv.style.backgroundImage = 'url("' + S.photo + '")';
+      pv.textContent = '';
+    } else {
+      pv.style.backgroundImage = '';
+      pv.textContent = '?';
+    }
+  }
+  $('photo-input').addEventListener('change', function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var img = new Image();
+    var url = URL.createObjectURL(f);
+    img.onload = function () {
+      try {
+        var size = 96, cv = document.createElement('canvas');
+        cv.width = size; cv.height = size;
+        var cx = cv.getContext('2d');
+        // recorte cuadrado centrado
+        var s = Math.min(img.width, img.height);
+        cx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+        S.photo = cv.toDataURL('image/jpeg', 0.82);
+        try { localStorage.setItem('chinchimoni-photo', S.photo); } catch (e) {}
+        renderPhotoPreview();
+      } catch (e) {}
+      URL.revokeObjectURL(url);
+      ev.target.value = '';
+    };
+    img.src = url;
+  });
+
+  // Iconos en el HTML estático: <i data-icon="fist"></i>
+  (function enhanceStaticIcons() {
+    var nodes = document.querySelectorAll('[data-icon]');
+    for (var i = 0; i < nodes.length; i++) nodes[i].innerHTML = icon(nodes[i].getAttribute('data-icon'));
+  })();
+
+  function playerPhoto(id) {
+    if (id === S.playerId) return S.photo;
+    for (var i = 0; i < S.players.length; i++) {
+      if (S.players[i].id === id) return S.players[i].photo || null;
+    }
+    return null;
+  }
 
   function startLocalGame(nAI) {
     var name = getName();
@@ -150,7 +238,7 @@
     S.local = true;
     S.isHost = true;
     S.channel = null;
-    S.players = [{ id: 'humano', name: name, joinedAt: 0 }];
+    S.players = [{ id: 'humano', name: name, joinedAt: 0, photo: S.photo }];
     for (var i = 0; i < nAI; i++) {
       S.players.push({ id: 'ai-' + i, name: AI_NAMES[i % AI_NAMES.length], joinedAt: i + 1 });
     }
@@ -195,7 +283,7 @@
 
     ch.subscribe(function (status) {
       if (status === 'SUBSCRIBED') {
-        ch.track({ name: S.name, joinedAt: S.joinedAt });
+        ch.track({ name: S.name, joinedAt: S.joinedAt, photo: S.photo });
         showScreen('lobby');
         renderLobby();
       } else if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
@@ -215,7 +303,7 @@
   $('btn-leave-game').addEventListener('click', leaveRoom);
   $('btn-copy').addEventListener('click', function () {
     var code = $('lobby-code').textContent;
-    if (navigator.clipboard) navigator.clipboard.writeText(code).then(function () { toast('Código copiado 📋'); });
+    if (navigator.clipboard) navigator.clipboard.writeText(code).then(function () { toast(icon('check') + ' Código copiado'); });
     else toast('Código: ' + code, 4000);
   });
 
@@ -225,7 +313,7 @@
     var players = [];
     Object.keys(state).forEach(function (key) {
       var pres = state[key];
-      if (pres && pres.length) players.push({ id: key, name: String(pres[0].name || '¿?').slice(0, 12), joinedAt: pres[0].joinedAt || 0 });
+      if (pres && pres.length) players.push({ id: key, name: String(pres[0].name || '¿?').slice(0, 12), joinedAt: pres[0].joinedAt || 0, photo: pres[0].photo || null });
     });
     players.sort(function (a, b) { return a.joinedAt - b.joinedAt; });
     S.players = players;
@@ -274,8 +362,14 @@
     var ul = $('lobby-players');
     ul.innerHTML = '';
     S.players.forEach(function (p, i) {
-      var li = el('li');
-      li.appendChild(el('span', (i === 0 ? '👑 ' : '') + p.name));
+      var li = el('li', null, 'lobby-player');
+      var av = el('span', null, 'lobby-avatar');
+      if (p.photo) av.style.backgroundImage = 'url("' + p.photo + '")';
+      else av.textContent = (p.name || '?').charAt(0).toUpperCase();
+      li.appendChild(av);
+      var nm = el('span');
+      nm.innerHTML = (i === 0 ? icon('crown') + ' ' : '') + escapeHtml(p.name);
+      li.appendChild(nm);
       if (p.id === S.playerId) li.appendChild(el('span', '(tú)', 'muted'));
       ul.appendChild(li);
     });
@@ -283,9 +377,12 @@
     var startBtn = $('btn-start');
     startBtn.classList.toggle('hidden', !S.isHost);
     startBtn.disabled = S.players.length < 2;
-    $('lobby-note').textContent = S.players.length >= L.MAX_PLAYERS
-      ? 'Sala llena: quien entre ahora mirará hasta la próxima ronda.'
-      : 'Comparte el código con tus amigos. El primero en entrar es el anfitrión 👑.';
+    var note = $('lobby-note');
+    if (S.players.length >= L.MAX_PLAYERS) {
+      note.textContent = 'Sala llena: quien entre ahora mirará hasta la próxima ronda.';
+    } else {
+      note.innerHTML = 'Comparte el código con tus amigos. El primero en entrar es el anfitrión ' + icon('crown') + '.';
+    }
   }
   $('btn-start').addEventListener('click', function () {
     if (!S.isHost || S.players.length < 2) return;
@@ -331,6 +428,7 @@
       lastReveal: null, lastGameOver: null, winnerId: null, loserId: null
     };
     S.selHide = null; S.selGuess = null;
+    if (reset) S.stats = {};
     hideModal();
 
     send('start_round', {
@@ -341,8 +439,8 @@
     showScreen('game');
     renderAll();
     toast(finalDuel
-      ? '⚔️ ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
-      : '🪙 Ronda ' + S.game.round + ': esconde tus monedas');
+      ? icon('zap') + ' ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
+      : icon('coins') + ' Ronda ' + S.game.round + ': esconde tus monedas');
     if (S.local) scheduleAiHides();
   }
 
@@ -479,12 +577,13 @@
       winnerId: null, loserId: null
     };
     S.selHide = null; S.selGuess = null;
+    if (p.round === 1) S.stats = {}; // partida nueva: estadísticas a cero
     hideModal();
     showScreen('game');
     renderAll();
     toast(p.finalDuel
-      ? '⚔️ ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
-      : '🪙 Ronda ' + p.round + ': esconde tus monedas');
+      ? icon('zap') + ' ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
+      : icon('coins') + ' Ronda ' + p.round + ': esconde tus monedas');
     if (S.local) scheduleAiHides();
   }
 
@@ -509,7 +608,7 @@
     S.selGuess = null;
     renderAll();
     if (p.playerId === S.playerId && inRoster() && S.game.guesses[S.playerId] === undefined) {
-      toast('🎯 Te toca: ¿cuántas monedas suman entre todos?');
+      toast(icon('target') + ' Te toca: ¿cuántas monedas suman entre todos?');
     }
     if (S.local && isAI(p.playerId)) {
       var round = S.game.round, aiId = p.playerId;
@@ -528,6 +627,7 @@
     S.game.saved = p.saved || S.game.saved;
     if (p.hits) S.game.hits = p.hits;
     S.game.lastReveal = p;
+    trackStats(p);
     renderAll();
   }
 
@@ -540,8 +640,26 @@
     if (p.hits) S.game.hits = p.hits;
     S.game.lastReveal = p;
     S.game.lastGameOver = p;
+    trackStats(p); // la ronda final no pasa por onReveal
     renderAll();
     showGameOverModal(p);
+  }
+
+  // Estadísticas de la partida (las calcula cada cliente con lo que ve por la sala).
+  function trackStats(p) {
+    if (!S.game || !S.stats) return;
+    var round = S.game.round;
+    function st(id) {
+      if (!S.stats[id]) S.stats[id] = { apuestas: 0, aciertos: 0, rondaSalvado: 0 };
+      return S.stats[id];
+    }
+    S.game.roster.forEach(st);
+    Object.keys(p.guesses || {}).forEach(function (id) { st(id).apuestas++; });
+    (p.correct || []).forEach(function (id) { st(id).aciertos++; });
+    (p.newlySaved || []).forEach(function (id) {
+      if (!st(id).rondaSalvado) st(id).rondaSalvado = round;
+    });
+    if (p.winnerId) st(p.winnerId); // el ganador del duelo también queda registrado
   }
 
   function onRoundAbort(p) {
@@ -633,9 +751,9 @@
 
   // ---------- render ----------
   function renderAll() {
-    renderCentro(); renderMesa(); renderActions(); renderScores();
+    renderCentro(); renderMesa(); renderActions(); renderScores(); renderStats();
     $('game-round').textContent = S.game && S.game.finalDuel
-      ? '⚔️ Duelo final'
+      ? 'Duelo final'
       : 'Ronda ' + (S.game ? S.game.round : 1);
     $('game-code').textContent = S.local ? 'en solitario' : 'sala ' + S.roomCode;
   }
@@ -649,18 +767,25 @@
     var big = el('div', null, 'centro-big');
     var sub = el('div', null, 'centro-sub');
     if (!inRoster()) {
-      if (isSaved()) { big.textContent = '✅'; sub.textContent = 'Estás salvado'; }
-      else { big.textContent = '👀'; sub.textContent = 'Entras en la próxima ronda'; }
+      if (isSaved()) { big.innerHTML = icon('check'); sub.textContent = 'Estás salvado'; }
+      else { big.innerHTML = icon('eye'); sub.textContent = 'Entras en la próxima ronda'; }
     } else if (g.state === 'hiding') {
-      big.textContent = '✊';
+      big.innerHTML = icon('fist');
       sub.textContent = g.myHide === null
         ? 'Esconde (' + g.hideDone + '/' + g.hideTotal + ')' + (g.round === 1 ? ' · mín. 1' : '')
         : 'Puño cerrado (' + g.hideDone + '/' + g.hideTotal + ')';
     } else if (g.state === 'guessing') {
-      big.textContent = '🎯';
-      sub.textContent = (g.turnId === S.playerId && g.guesses[S.playerId] === undefined)
-        ? 'Te toca adivinar'
-        : 'Turno de ' + playerName(g.turnId);
+      var myTurn = g.turnId === S.playerId && g.guesses[S.playerId] === undefined;
+      var firstToSay = Object.keys(g.guesses).length === 0;
+      if (g.finalDuel && myTurn && firstToSay) {
+        // Aviso explícito: en el duelo sales tú primero diciendo.
+        big.innerHTML = icon('zap');
+        big.classList.add('alerta');
+        sub.innerHTML = '<strong>¡Sales primero!</strong> Di tu número';
+      } else {
+        big.innerHTML = icon('target');
+        sub.textContent = myTurn ? 'Te toca adivinar' : 'Turno de ' + playerName(g.turnId);
+      }
     } else if (g.state === 'reveal' && g.lastReveal) {
       var r = g.lastReveal;
       big.textContent = r.total;
@@ -670,13 +795,13 @@
           return playerName(id) + ' ' + (g.hits[id] || 0);
         }).join(' · ');
       } else if (r.newlySaved && r.newlySaved.length) {
-        sub.textContent = '✅ salvados: ' + r.newlySaved.map(playerName).join(', ');
+        sub.textContent = 'Salvados: ' + r.newlySaved.map(playerName).join(', ');
       } else {
         sub.textContent = 'nadie acertó';
       }
-      if (r.startDuel) sub.textContent += ' · ⚔️ ¡duelo final la próxima!';
+      if (r.startDuel) sub.textContent += ' · ¡duelo final la próxima!';
     } else if (g.state === 'gameOver') {
-      big.textContent = '🏆';
+      big.innerHTML = icon('trophy');
       sub.textContent = 'Partida terminada';
     }
     c.appendChild(big);
@@ -696,10 +821,12 @@
     for (var k = 0; k < olds.length; k++) olds[k].remove();
     S.seats = {};
     var g = S.game;
-    // Yo abajo, los demás en el orden de la mesa; los salvados también se quedan.
-    var order = [S.playerId]
-      .concat(g.roster.filter(function (id) { return id !== S.playerId; }))
-      .concat(g.saved.filter(function (id) { return g.roster.indexOf(id) === -1 && id !== S.playerId; }));
+    // En la mesa solo los que van a jugar: el roster activo.
+    // Yo siempre tengo mi asiento abajo (aunque ya esté salvado, miro desde ahí).
+    var order = [S.playerId].concat(g.roster.filter(function (id) { return id !== S.playerId; }));
+    var dedup = [];
+    order.forEach(function (id) { if (dedup.indexOf(id) === -1) dedup.push(id); });
+    order = dedup;
     var n = order.length;
     order.forEach(function (id, i) {
       var ang = Math.PI / 2 + i * (2 * Math.PI / n); // empiezo abajo, sentido horario
@@ -709,7 +836,15 @@
       s.style.left = x.toFixed(2) + '%';
       s.style.top = y.toFixed(2) + '%';
       var bub = el('div', null, 'bocadillo hidden');
-      var av = el('div', (playerName(id) || '?').charAt(0).toUpperCase(), 'avatar');
+      var av = el('div', null, 'avatar');
+      var photo = playerPhoto(id);
+      if (photo) {
+        av.style.backgroundImage = 'url("' + photo + '")';
+      } else if (isAI(id)) {
+        av.innerHTML = icon('bot');
+      } else {
+        av.textContent = (playerName(id) || '?').charAt(0).toUpperCase();
+      }
       var nm = el('div', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'anombre');
       var est = el('div', null, 'aestado');
       s.appendChild(bub); s.appendChild(av); s.appendChild(nm); s.appendChild(est);
@@ -734,14 +869,14 @@
       var showBubble = inR && !savedP && g.state === 'guessing' && g.guesses[id] !== undefined;
       st.bubble.classList.toggle('hidden', !showBubble);
       if (showBubble) st.bubble.textContent = g.guesses[id];
-      // Estado bajo el nombre.
-      var txt = '';
-      if (savedP) txt = '✅';
-      else if (g.state === 'hiding') txt = (id === S.playerId && g.myHide !== null) ? '✊' : '💭';
-      else if (g.state === 'guessing') txt = active ? '🎯' : '';
-      else if (g.state === 'reveal' && g.lastReveal) txt = '🖐️' + (g.lastReveal.hides[id] || 0) + '🪙';
-      else if (g.finalDuel && inR) txt = '🎯' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN;
-      st.estado.textContent = txt;
+      // Estado bajo el nombre (iconos modernos).
+      var html = '';
+      if (savedP && id === S.playerId) html = icon('check');
+      else if (g.state === 'hiding') html = (id === S.playerId && g.myHide !== null) ? icon('fist') : icon('think');
+      else if (g.state === 'guessing' && active) html = icon('target');
+      else if (g.state === 'reveal' && g.lastReveal) html = icon('coins') + ' <b>' + (g.lastReveal.hides[id] || 0) + '</b>';
+      else if (g.finalDuel && inR && g.state !== 'reveal') html = icon('target') + ' <b>' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + '</b>';
+      st.estado.innerHTML = html;
     });
   }
 
@@ -752,7 +887,9 @@
     if (!g) return;
     // El anfitrión avanza la partida aunque él ya esté salvado.
     if (g.state === 'reveal' && S.isHost) {
-      var b3 = el('button', g.lastReveal && g.lastReveal.startDuel ? '⚔️ Empezar el duelo' : '▶ Siguiente ronda', 'btn btn-big');
+      var b3 = g.lastReveal && g.lastReveal.startDuel
+        ? btnIcon('Empezar el duelo', 'zap', 'btn btn-big')
+        : btnIcon('Siguiente ronda', 'play', 'btn btn-big');
       b3.onclick = function () { hostStartRound(false); };
       box.appendChild(b3);
       return;
@@ -770,7 +907,7 @@
         })(i);
       }
       box.appendChild(row);
-      var b = el('button', 'Esconder ✊', 'btn btn-big');
+      var b = btnIcon('Esconder', 'fist', 'btn btn-big');
       b.disabled = S.selHide === null;
       b.onclick = doHide;
       box.appendChild(b);
@@ -788,7 +925,7 @@
         })(n2);
       }
       box.appendChild(pad);
-      var b2 = el('button', 'Adivinar 🎯', 'btn btn-big');
+      var b2 = btnIcon('Adivinar', 'target', 'btn btn-big');
       b2.disabled = S.selGuess === null;
       b2.onclick = doGuess;
       box.appendChild(b2);
@@ -802,33 +939,92 @@
     if (!g) return;
     if (g.saved.length) {
       var li0 = el('li');
-      li0.appendChild(el('span', '✅ Salvados'));
+      li0.innerHTML = icon('check') + ' ';
+      li0.appendChild(el('span', 'Salvados'));
       li0.appendChild(el('span', g.saved.map(playerName).join(', ')));
       ul.appendChild(li0);
     }
     g.roster.forEach(function (id) {
       var li = el('li');
       li.appendChild(el('span', playerName(id) + (id === S.playerId ? ' (tú)' : '')));
-      var extra = g.finalDuel ? '🎯 ' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + '  ' : '';
-      li.appendChild(el('span', extra + '🪙🪙🪙'));
+      var right = el('span');
+      right.innerHTML = (g.finalDuel ? icon('target') + ' ' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + ' ' : '') + icon('coins');
+      li.appendChild(right);
       ul.appendChild(li);
     });
+  }
+
+  function renderStats() {
+    var t = $('stats-table');
+    t.innerHTML = '';
+    var g = S.game;
+    if (!g) return;
+    var ids = Object.keys(S.stats || {});
+    if (!ids.length) {
+      var tr0 = el('tr');
+      tr0.appendChild(el('td', 'Sin apuestas todavía.', 'muted'));
+      t.appendChild(tr0);
+      return;
+    }
+    ids.sort(function (a, b) {
+      var sa = S.stats[a], sb = S.stats[b];
+      return (sb.aciertos - sa.aciertos) || (sa.apuestas - sb.apuestas);
+    });
+    var head = el('tr');
+    ['Jugador', 'Apuestas', 'Aciertos', '%'].forEach(function (h) { head.appendChild(el('th', h)); });
+    t.appendChild(head);
+    ids.forEach(function (id) {
+      var s = S.stats[id];
+      var pct = s.apuestas ? Math.round(100 * s.aciertos / s.apuestas) : 0;
+      var tr = el('tr');
+      var tdName = el('td');
+      tdName.textContent = playerName(id) + (id === S.playerId ? ' (tú)' : '');
+      if (g.saved.indexOf(id) !== -1) tdName.innerHTML = icon('check') + ' ' + tdName.textContent;
+      tr.appendChild(tdName);
+      tr.appendChild(el('td', String(s.apuestas)));
+      tr.appendChild(el('td', String(s.aciertos)));
+      tr.appendChild(el('td', pct + '%'));
+      t.appendChild(tr);
+    });
+  }
+
+  function buildRanking(p) {
+    // Orden: ganador del duelo primero, luego salvados por ronda, pringado al final.
+    var order = [];
+    function push(id) { if (id && order.indexOf(id) === -1) order.push(id); }
+    var savedSorted = (p.saved || []).slice().sort(function (a, b) {
+      var ra = (S.stats[a] && S.stats[a].rondaSalvado) || 99;
+      var rb = (S.stats[b] && S.stats[b].rondaSalvado) || 99;
+      return ra - rb;
+    });
+    if (p.finalDuel && p.winnerId) push(p.winnerId);
+    savedSorted.forEach(push);
+    if (p.loserId) push(p.loserId);
+    return order;
+  }
+
+  function rankingDetail(id, p) {
+    var s = S.stats[id] || { apuestas: 0, aciertos: 0, rondaSalvado: 0 };
+    var acc = s.aciertos + '/' + s.apuestas + ' aciertos';
+    if (id === p.loserId) return 'pringado · ' + acc;
+    if (p.finalDuel && id === p.winnerId) return 'ganó el duelo · ' + acc;
+    return 'salvado en ronda ' + (s.rondaSalvado || '—') + ' · ' + acc;
   }
 
   function showGameOverModal(p) {
     var g = S.game;
     var wrap = el('div');
     if (p.finalDuel) {
-      wrap.appendChild(el('div', '🏆', 'winner'));
+      var wicon = el('div', null, 'winner'); wicon.innerHTML = icon('trophy'); wrap.appendChild(wicon);
       var h = el('h2', '¡' + playerName(p.winnerId) + ' gana el duelo!');
       h.style.textAlign = 'center';
       wrap.appendChild(h);
       var sub = el('p', 'Acertó ' + L.FINAL_HITS_TO_WIN + ' rondas antes que nadie. ' +
-        (p.loserId ? playerName(p.loserId) + ' es el pringado 😅' : ''), 'muted');
+        (p.loserId ? playerName(p.loserId) + ' es el pringado.' : ''), 'muted');
       sub.style.textAlign = 'center'; sub.style.color = '#555';
       wrap.appendChild(sub);
     } else if (p.everyoneSaved) {
-      wrap.appendChild(el('div', '🎉', 'winner'));
+      var wicon2 = el('div', null, 'winner'); wicon2.innerHTML = icon('check'); wrap.appendChild(wicon2);
       var h2 = el('h2', '¡Todos salvados!');
       h2.style.textAlign = 'center';
       wrap.appendChild(h2);
@@ -836,7 +1032,7 @@
       sub2.style.textAlign = 'center'; sub2.style.color = '#555';
       wrap.appendChild(sub2);
     } else {
-      wrap.appendChild(el('div', '😅', 'winner'));
+      var wicon3 = el('div', null, 'winner'); wicon3.innerHTML = icon('frown'); wrap.appendChild(wicon3);
       var h3 = el('h2', '¡' + playerName(p.loserId) + ' es el pringado!');
       h3.style.textAlign = 'center';
       wrap.appendChild(h3);
@@ -844,9 +1040,23 @@
       sub3.style.textAlign = 'center'; sub3.style.color = '#555';
       wrap.appendChild(sub3);
     }
+    // Clasificación final de la partida.
+    wrap.appendChild(el('h3', 'Clasificación', 'rank-title'));
+    var rankList = el('div', null, 'rank-list');
+    buildRanking(p).forEach(function (id, i) {
+      var row = el('div', null, 'rank-row' + (id === p.loserId ? ' pringado' : ''));
+      row.innerHTML = i === 0 ? icon('crown') : '<span class="rank-pos">' + (i + 1) + '</span>';
+      var box = el('div');
+      var nm = el('div', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'rank-name');
+      box.appendChild(nm);
+      box.appendChild(el('div', rankingDetail(id, p), 'muted rank-det'));
+      row.appendChild(box);
+      rankList.appendChild(row);
+    });
+    wrap.appendChild(rankList);
     var row = el('div', null, 'row');
     if (S.isHost) {
-      var btnR = el('button', '🔄 Jugar otra vez', 'btn btn-big');
+      var btnR = btnIcon('Jugar otra vez', 'refresh', 'btn btn-big');
       btnR.onclick = function () { hostStartRound(true); };
       row.appendChild(btnR);
     } else {

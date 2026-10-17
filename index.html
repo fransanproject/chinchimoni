@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chinchimoni 🪙 — el juego de las monedas escondidas</title>
+<title>Chinchimoni — el juego de las monedas escondidas</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="logic.js"></script>
@@ -13,13 +13,22 @@
 <!-- ============ PORTADA ============ -->
 <section id="screen-home" class="screen">
   <div class="hero">
-    <div class="logo">🪙</div>
+    <div class="logo"><i data-icon="coins"></i></div>
     <h1>Chinchimoni</h1>
     <p class="tagline">El juego de las monedas escondidas, online con tus amigos.<br>Salas con código · hasta 12 jugadores.</p>
   </div>
   <div class="card-panel">
-    <label for="input-name">Tu nombre</label>
-    <input type="text" id="input-name" maxlength="12" placeholder="Ej: Mork" autocomplete="off">
+    <div class="profile-row">
+      <div class="photo-picker">
+        <div id="photo-preview" class="photo-preview">?</div>
+        <label for="photo-input" class="btn-small photo-btn">Foto</label>
+        <input type="file" id="photo-input" accept="image/*" class="hidden">
+      </div>
+      <div class="name-field">
+        <label for="input-name">Tu nombre</label>
+        <input type="text" id="input-name" maxlength="12" placeholder="Ej: Mork" autocomplete="off">
+      </div>
+    </div>
     <div class="row">
       <button id="btn-create" class="btn btn-big">Crear sala</button>
     </div>
@@ -30,7 +39,7 @@
     </div>
     <div class="divider">— o —</div>
     <div class="row">
-      <button id="btn-solo" class="btn btn-big">🤖 Jugar solo contra la IA</button>
+      <button id="btn-solo" class="btn btn-big"><i data-icon="bot"></i> Jugar solo contra la IA</button>
     </div>
     <div id="solo-setup" class="hidden" style="margin-top:12px;text-align:center">
       <p class="muted" style="margin:6px 0">¿Cuántos rivales?</p>
@@ -44,11 +53,11 @@
   <details class="rules">
     <summary>¿Cómo se juega?</summary>
     <ul>
-      <li>Cada ronda, todos esconden <b>a la vez</b> 0, 1, 2 o 3 monedas en el puño ✊ (<b>en la primera ronda mínimo 1</b>).</li>
+      <li>Cada ronda, todos esconden <b>a la vez</b> 0, 1, 2 o 3 monedas en el puño <i data-icon="fist"></i> (<b>en la primera ronda mínimo 1</b>).</li>
       <li>Por turnos (rotando quién empieza), cada jugador <b>dice un número</b>: su apuesta de cuántas monedas suman <b>entre todos</b>. No se puede repetir un número ya dicho.</li>
-      <li>¡Manos arriba! 🖐️ Quien <b>acierte la suma exacta</b> queda <b>salvado</b> ✅ y no juega más.</li>
-      <li>Cuando solo quedan <b>2 jugadores</b>: ⚔️ <b>duelo final</b>, el primero en acertar <b>3 rondas</b> se salva. El otro es el pringado 😅.</li>
-      <li>🤫 Lo que escondes viaja por la sala: no cotillees la consola del navegador, tramposo.</li>
+      <li>¡Manos arriba! Quien <b>acierte la suma exacta</b> queda <b>salvado</b> <i data-icon="check"></i> y no juega más.</li>
+      <li>Cuando solo quedan <b>2 jugadores</b>: <i data-icon="zap"></i> <b>duelo final</b>, el primero en acertar <b>3 rondas</b> se salva. El otro es el pringado.</li>
+      <li>Lo que escondes viaja por la sala: no cotillees la consola del navegador, tramposo.</li>
     </ul>
   </details>
 </section>
@@ -57,12 +66,12 @@
 <section id="screen-lobby" class="screen hidden" style="text-align:center">
   <h2>Código de sala</h2>
   <div><span id="lobby-code" class="code">····</span></div>
-  <div style="margin:10px 0"><button id="btn-copy" class="btn-small">📋 Copiar código</button></div>
+  <div style="margin:10px 0"><button id="btn-copy" class="btn-small">Copiar código</button></div>
   <p id="lobby-note" class="muted"></p>
   <ul id="lobby-players"></ul>
   <p id="lobby-count" class="muted"></p>
   <div class="row">
-    <button id="btn-start" class="btn btn-big hidden">🪙 Empezar partida</button>
+    <button id="btn-start" class="btn btn-big hidden"><i data-icon="play"></i> Empezar partida</button>
     <button id="btn-leave-lobby" class="btn-secondary">Salir</button>
   </div>
 </section>
@@ -80,8 +89,12 @@
   </div>
   <div id="actions" class="actions"></div>
   <details id="scoreboard" class="scoreboard">
-    <summary>✅ Salvados</summary>
+    <summary><i data-icon="check"></i> Salvados</summary>
     <ul id="scores-list"></ul>
+  </details>
+  <details id="statsboard" class="scoreboard">
+    <summary><i data-icon="chart"></i> Estadísticas</summary>
+    <table id="stats-table" class="stat-table"></table>
   </details>
 </section>
 

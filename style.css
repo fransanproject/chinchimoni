@@ -17,6 +17,7 @@ body {
 /* ---------- home ---------- */
 .hero { text-align: center; margin: 30px 0 20px; }
 .hero .logo { font-size: 64px; }
+.hero .logo .ic { width: 72px; height: 72px; color: var(--gold); }
 .hero h1 { margin: 8px 0; font-size: 42px; letter-spacing: 1px; }
 .tagline { color: #d9d2ec; margin: 0 0 10px; }
 .card-panel {
@@ -36,6 +37,21 @@ body {
   border: 2px solid transparent;
   margin-bottom: 12px;
 }
+.profile-row { display: flex; gap: 14px; align-items: flex-end; margin-bottom: 4px; }
+.photo-picker { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.photo-preview {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: linear-gradient(145deg, #5b4a8a, #332a52);
+  border: 3px solid rgba(255,255,255,.28);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: bold; color: #fff;
+  background-size: cover; background-position: center; flex-shrink: 0;
+}
+.photo-btn { cursor: pointer; white-space: nowrap; }
+.name-field { flex: 1; min-width: 0; }
+i[data-icon] { font-style: normal; display: inline-block; }
+i[data-icon] .ic { width: 1.3em; height: 1.3em; vertical-align: -0.3em; }
+.btn i[data-icon] .ic { width: 20px; height: 20px; vertical-align: -4px; margin-right: 8px; }
 .code-input { text-transform: uppercase; letter-spacing: 6px; text-align: center; font-weight: bold; }
 .row { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
 .divider { text-align: center; color: #b3a8d6; margin: 10px 0; }
@@ -77,9 +93,18 @@ body {
 .muted { color: #b3a8d6; }
 #lobby-players { list-style: none; padding: 0; max-width: 420px; margin: 16px auto; }
 #lobby-players li {
-  background: rgba(0,0,0,.3); margin: 6px 0; padding: 10px 14px;
-  border-radius: 10px; font-size: 17px; display: flex; justify-content: space-between;
+  background: rgba(0,0,0,.3); margin: 6px 0; padding: 8px 14px 8px 8px;
+  border-radius: 10px; font-size: 17px; display: flex; align-items: center; gap: 10px;
 }
+.lobby-avatar {
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(145deg, #5b4a8a, #332a52);
+  border: 2px solid rgba(255,255,255,.28);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: bold; background-size: cover; background-position: center;
+}
+.lobby-player .ic { width: 18px; height: 18px; color: var(--gold); vertical-align: -3px; }
+.lobby-player .muted { margin-left: auto; }
 
 /* ---------- game ---------- */
 .game-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -102,14 +127,29 @@ body {
 .centro-sub { font-size: 14px; color: #d9d2ec; margin-top: 6px; line-height: 1.35; }
 @keyframes pop { 0% { transform: scale(.3); opacity: 0; } 60% { transform: scale(1.18); } 100% { transform: scale(1); opacity: 1; } }
 
-.asiento { position: absolute; transform: translate(-50%,-50%); width: 96px; text-align: center; z-index: 2; }
+.ic { width: 1.25em; height: 1.25em; vertical-align: -0.28em; }
+.btn .ic { width: 20px; height: 20px; vertical-align: -4px; margin-right: 8px; }
+.centro-big .ic { width: 54px; height: 54px; }
+.centro-big.alerta .ic { color: var(--gold); animation: alerta-pulse 1s infinite; }
+.centro-big.alerta + .centro-sub { color: #ffe9a8; font-size: 17px; }
+@keyframes alerta-pulse { 50% { transform: scale(1.18); filter: drop-shadow(0 0 10px rgba(245,197,66,.9)); } }
+.centro-sub .ic { width: 16px; height: 16px; }
+.aestado .ic { width: 22px; height: 22px; }
+.anombre .ic { width: 14px; height: 14px; }
+.winner .ic { width: 72px; height: 72px; color: var(--gold); }
+.rank-row .ic { width: 22px; height: 22px; color: var(--gold); flex-shrink: 0; }
+.stat-table .ic { width: 18px; height: 18px; }
+
+.asiento { position: absolute; transform: translate(-50%,-50%); width: 112px; text-align: center; z-index: 2; }
 .avatar {
-  width: 50px; height: 50px; border-radius: 50%; margin: 0 auto;
+  width: 64px; height: 64px; border-radius: 50%; margin: 0 auto;
   background: linear-gradient(145deg, #5b4a8a, #332a52);
   display: flex; align-items: center; justify-content: center;
-  font-size: 23px; font-weight: bold; border: 3px solid rgba(255,255,255,.28);
+  font-size: 26px; font-weight: bold; border: 3px solid rgba(255,255,255,.28);
   box-shadow: 0 3px 8px rgba(0,0,0,.45);
+  background-size: cover; background-position: center;
 }
+.avatar .ic { width: 30px; height: 30px; opacity: .85; }
 .asiento.activo .avatar { border-color: var(--gold); box-shadow: 0 0 18px rgba(245,197,66,.95); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 30px rgba(245,197,66,1); } }
 .asiento.salvado { opacity: .55; }
@@ -144,6 +184,25 @@ body {
 .actions .btn { margin: 8px 4px; }
 
 .scoreboard { max-width: 420px; margin: 18px auto 0; background: rgba(0,0,0,.3); border-radius: 12px; padding: 10px 16px; }
+.scoreboard summary { cursor: pointer; font-weight: bold; }
+.stat-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+.stat-table th, .stat-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.12); }
+.stat-table th { color: #ffe9a8; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.stat-table td:nth-child(n+2), .stat-table th:nth-child(n+2) { text-align: center; }
+.rank-title { text-align: center; margin: 18px 0 8px; color: #ffe9a8; }
+.rank-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.rank-row {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(0,0,0,.06); border-radius: 12px; padding: 8px 12px;
+}
+.rank-row .rank-pos {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(0,0,0,.12); display: flex; align-items: center; justify-content: center;
+  font-weight: bold; font-size: 13px;
+}
+.rank-row.pringado { opacity: .75; }
+.rank-name { font-weight: bold; }
+.rank-det { font-size: 13px; }
 .scoreboard summary { cursor: pointer; color: var(--gold); font-weight: bold; }
 .scoreboard ul { list-style: none; padding: 0; margin: 8px 0; }
 .scoreboard li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.1); }
@@ -172,8 +231,9 @@ body {
 @media (max-width: 560px) {
   .hero h1 { font-size: 34px; }
   .num { font-size: 18px; padding: 10px 0; }
-  .asiento { width: 66px; }
-  .avatar { width: 38px; height: 38px; font-size: 18px; }
+  .asiento { width: 84px; }
+  .avatar { width: 50px; height: 50px; font-size: 21px; }
+  .avatar .ic { width: 24px; height: 24px; }
   .anombre { font-size: 11px; }
   .aestado { font-size: 13px; min-height: 18px; }
   .bocadillo { font-size: 21px; min-width: 42px; padding: 4px 9px; }

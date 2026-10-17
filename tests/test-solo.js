@@ -32,7 +32,8 @@ function makeEl(tag) {
   });
   Object.defineProperty(e, 'innerHTML', {
     get() { return e._html; },
-    set(v) { e._html = v; e.children = []; }
+    // como en un navegador: innerHTML actualiza textContent (sin etiquetas)
+    set(v) { e._html = v; e.children = []; e.textContent = String(v).replace(/<[^>]*>/g, ''); }
   });
   Object.defineProperty(e, 'firstChild', { get() { return e.children[0] || null; } });
   return e;
@@ -50,6 +51,7 @@ const sandbox = {
   document: {
     getElementById(id) { return byId[id] || (byId[id] = makeEl('div#' + id)); },
     createElement(tag) { return makeEl(tag); },
+    querySelectorAll() { return []; },
   },
 };
 sandbox.window = sandbox;
@@ -78,6 +80,16 @@ function findAllByClass(root, cls) {
     stack.push(...(n.children || []));
   }
   return out;
+}
+function countTag(root, tag) {
+  let n = 0;
+  const stack = [root];
+  while (stack.length) {
+    const x = stack.pop();
+    if (x.tag === tag) n++;
+    stack.push(...(x.children || []));
+  }
+  return n;
 }
 function numButtons(root) {
   const out = [];
@@ -129,8 +141,10 @@ try {
       const txt = deepText($('modal-panel'));
       gameOvers++;
       ok(/pringado|gana el duelo|Todos salvados/.test(txt), 'modal de fin muestra resultado: ' + txt.slice(0, 70));
+      ok(findAllByClass($('modal-panel'), 'rank-row').length >= 2, 'el modal muestra la clasificación final');
+      ok(countTag($('stats-table'), 'tr') >= 2, 'la tabla de estadísticas tiene datos');
       if (restarts === 0) {
-        const again = findBtn($('modal-panel'), '🔄 Jugar otra vez');
+        const again = findBtn($('modal-panel'), 'Jugar otra vez');
         ok(!!again, 'botón jugar otra vez existe');
         fireClick(again);
         restarts++;
@@ -139,9 +153,9 @@ try {
       break;
     }
     const actions = $('actions'), mesa = $('mesa');
-    const escBtn = findBtn(actions, 'Esconder ✊', true);
-    const advBtn = findBtn(actions, 'Adivinar 🎯', true);
-    const nextBtn = findBtn(actions, '▶ Siguiente ronda') || findBtn(actions, '⚔️ Empezar el duelo');
+    const escBtn = findBtn(actions, 'Esconder', true);
+    const advBtn = findBtn(actions, 'Adivinar', true);
+    const nextBtn = findBtn(actions, 'Siguiente ronda') || findBtn(actions, 'Empezar el duelo');
     if (escBtn && escBtn.disabled) {
       // En la ronda 1 el 0 no debe ofrecerse (mínimo 1 moneda)
       const nums = numButtons(actions).map(b => b.textContent);
@@ -150,12 +164,12 @@ try {
         sawRound1Min1 = true;
       }
       if (!clickNum(actions, 1)) throw new Error('no hay botón de número para esconder');
-      const b = findBtn(actions, 'Esconder ✊');
+      const b = findBtn(actions, 'Esconder');
       if (!b) throw new Error('Esconder no se habilitó tras elegir');
       fireClick(b);
     } else if (advBtn && advBtn.disabled) {
       if (!clickNum(actions, 2)) throw new Error('no hay botón de número para adivinar');
-      const b = findBtn(actions, 'Adivinar 🎯');
+      const b = findBtn(actions, 'Adivinar');
       if (b) fireClick(b);
     } else if (nextBtn) {
       fireClick(nextBtn);
@@ -165,7 +179,7 @@ try {
     // Durante la fase de apuestas debe haber bocadillos visibles;
     // al resolver, el total aparece en grande en el centro de la mesa.
     const centroTxt = deepText($('mesa-centro'));
-    if (/🎯/.test(centroTxt)) {
+    if (/Te toca|Turno de/.test(centroTxt)) {
       if (findAllByClass(mesa, 'bocadillo').some(x => !hasClass(x, 'hidden'))) sawBubble = true;
     } else if (/Total|total/.test(centroTxt) || /\d/.test(centroTxt)) {
       const totalEl = findAllByClass($('mesa-centro'), 'centro-total');
