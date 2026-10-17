@@ -261,7 +261,7 @@
       else {
         g.hideDone = doneIds.length; g.hideTotal = need.length;
         send('hide_progress', { done: g.hideDone, total: g.hideTotal });
-        renderBanner(); renderStage();
+        renderCentro(); renderMesa();
       }
     } else if (g.state === 'guessing') {
       if (!pr[g.turnId]) advanceGuess();
@@ -360,7 +360,7 @@
     S.game.hideDone = done;
     S.game.hideTotal = need.length;
     send('hide_progress', { done: done, total: need.length });
-    renderBanner(); renderStage();
+    renderCentro(); renderMesa();
     if (need.length && done === need.length) beginGuessing();
   }
 
@@ -492,7 +492,7 @@
     if (!S.game) return;
     S.game.hideDone = p.done;
     S.game.hideTotal = p.total;
-    renderBanner(); renderStage();
+    renderCentro(); renderMesa();
   }
 
   function onGuessingStart(p) {
@@ -633,143 +633,116 @@
 
   // ---------- render ----------
   function renderAll() {
-    renderBanner(); renderPlayers(); renderStage(); renderActions(); renderScores();
+    renderCentro(); renderMesa(); renderActions(); renderScores();
     $('game-round').textContent = S.game && S.game.finalDuel
       ? '⚔️ Duelo final'
       : 'Ronda ' + (S.game ? S.game.round : 1);
     $('game-code').textContent = S.local ? 'en solitario' : 'sala ' + S.roomCode;
   }
 
-  function renderBanner() {
-    var b = $('turn-banner');
+  // Centro de la mesa: el estado de la partida, siempre visible.
+  function renderCentro() {
+    var c = $('mesa-centro');
+    c.innerHTML = '';
     var g = S.game;
-    b.classList.remove('my-turn');
-    if (!g) { b.textContent = '…'; return; }
+    if (!g) return;
+    var big = el('div', null, 'centro-big');
+    var sub = el('div', null, 'centro-sub');
     if (!inRoster()) {
-      b.textContent = isSaved()
-        ? '✅ ¡Estás salvado! A ver quién es el pringado…'
-        : 'Miras la partida: entrarás en la próxima.';
-      return;
-    }
-    if (g.state === 'hiding') {
-      if (g.myHide === null) {
-        var minH = g.round === 1 ? 1 : 0;
-        b.textContent = '✊ Esconde tus monedas en el puño (' + minH + '–' + L.START_COINS + ')' +
-          (g.round === 1 ? ' — en la primera ronda mínimo 1' : '');
-        b.classList.add('my-turn');
-      } else {
-        b.textContent = 'Puño cerrado… esperando al resto (' + g.hideDone + '/' + g.hideTotal + ')';
-      }
+      if (isSaved()) { big.textContent = '✅'; sub.textContent = 'Estás salvado'; }
+      else { big.textContent = '👀'; sub.textContent = 'Entras en la próxima ronda'; }
+    } else if (g.state === 'hiding') {
+      big.textContent = '✊';
+      sub.textContent = g.myHide === null
+        ? 'Esconde (' + g.hideDone + '/' + g.hideTotal + ')' + (g.round === 1 ? ' · mín. 1' : '')
+        : 'Puño cerrado (' + g.hideDone + '/' + g.hideTotal + ')';
     } else if (g.state === 'guessing') {
-      if (g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
-        b.textContent = '🎯 Te toca: ¿cuántas monedas suman entre todos?';
-        b.classList.add('my-turn');
-      } else if (g.guesses[S.playerId] !== undefined) {
-        b.textContent = 'Dijiste ' + g.guesses[S.playerId] + '. Esperando al resto…';
-      } else {
-        b.textContent = playerName(g.turnId) + ' está pensando su número…';
-      }
+      big.textContent = '🎯';
+      sub.textContent = (g.turnId === S.playerId && g.guesses[S.playerId] === undefined)
+        ? 'Te toca adivinar'
+        : 'Turno de ' + playerName(g.turnId);
     } else if (g.state === 'reveal' && g.lastReveal) {
       var r = g.lastReveal;
-      var msg = '🖐️ ¡Manos arriba! Total: ' + r.total;
+      big.textContent = r.total;
+      big.className = 'centro-total';
       if (r.finalDuel) {
-        var hs = g.roster.map(function (id) { return playerName(id) + ' ' + (g.hits[id] || 0); }).join(' · ');
-        msg += ' — aciertos: ' + hs;
+        sub.textContent = 'aciertos: ' + g.roster.map(function (id) {
+          return playerName(id) + ' ' + (g.hits[id] || 0);
+        }).join(' · ');
       } else if (r.newlySaved && r.newlySaved.length) {
-        msg += ' — ✅ salvados: ' + r.newlySaved.map(playerName).join(', ');
+        sub.textContent = '✅ salvados: ' + r.newlySaved.map(playerName).join(', ');
       } else {
-        msg += ' — nadie acertó';
+        sub.textContent = 'nadie acertó';
       }
-      if (r.startDuel) msg += ' — ⚔️ ¡la próxima es duelo final!';
-      b.textContent = msg;
+      if (r.startDuel) sub.textContent += ' · ⚔️ ¡duelo final la próxima!';
     } else if (g.state === 'gameOver') {
-      b.textContent = 'Partida terminada.';
+      big.textContent = '🏆';
+      sub.textContent = 'Partida terminada';
     }
+    c.appendChild(big);
+    c.appendChild(sub);
   }
 
-  function renderPlayers() {
-    var box = $('opponents');
-    box.innerHTML = '';
+  // Asientos alrededor de la mesa: se construyen una vez por ronda
+  // y luego solo se actualiza su estado (todos siempre en pantalla).
+  function seatKey() {
     var g = S.game;
-    if (!g) return;
-    var show = g.roster.concat(g.saved.filter(function (id) { return g.roster.indexOf(id) === -1; }));
-    show.forEach(function (id) {
-      var savedP = g.saved.indexOf(id) !== -1;
-      var active = !savedP && g.state === 'guessing' && g.turnId === id && g.guesses[id] === undefined;
-      var chip = el('div', null, 'chip' + (active ? ' activo' : '') + (savedP ? ' salvado' : ''));
-      chip.appendChild(el('span', (savedP ? '✅ ' : '') + playerName(id) + (id === S.playerId ? ' (tú)' : '')));
-      if (g.finalDuel && !savedP) {
-        chip.appendChild(el('span', '🎯 ' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN, 'ncartas'));
-      }
-      box.appendChild(chip);
+    return g.round + '|' + g.roster.join(',') + '|' + g.saved.join(',');
+  }
+
+  function buildSeats() {
+    var mesa = $('mesa');
+    var olds = mesa.querySelectorAll('.asiento');
+    for (var k = 0; k < olds.length; k++) olds[k].remove();
+    S.seats = {};
+    var g = S.game;
+    // Yo abajo, los demás en el orden de la mesa; los salvados también se quedan.
+    var order = [S.playerId]
+      .concat(g.roster.filter(function (id) { return id !== S.playerId; }))
+      .concat(g.saved.filter(function (id) { return g.roster.indexOf(id) === -1 && id !== S.playerId; }));
+    var n = order.length;
+    order.forEach(function (id, i) {
+      var ang = Math.PI / 2 + i * (2 * Math.PI / n); // empiezo abajo, sentido horario
+      var x = 50 + 43 * Math.cos(ang);
+      var y = 50 + 43 * Math.sin(ang);
+      var s = el('div', null, 'asiento');
+      s.style.left = x.toFixed(2) + '%';
+      s.style.top = y.toFixed(2) + '%';
+      var bub = el('div', null, 'bocadillo hidden');
+      var av = el('div', (playerName(id) || '?').charAt(0).toUpperCase(), 'avatar');
+      var nm = el('div', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'anombre');
+      var est = el('div', null, 'aestado');
+      s.appendChild(bub); s.appendChild(av); s.appendChild(nm); s.appendChild(est);
+      mesa.appendChild(s);
+      S.seats[id] = { root: s, bubble: bub, estado: est };
     });
+    S.builtSeatsKey = seatKey();
   }
 
-  function renderStage() {
-    var st = $('stage');
-    st.innerHTML = '';
+  function renderMesa() {
     var g = S.game;
     if (!g) return;
-
-    // El revelado lo ven todos, incluidos salvados y espectadores.
-    if (g.state === 'reveal' && g.lastReveal) {
-      var r = g.lastReveal;
-      st.appendChild(el('p', '🖐️ Total: ' + r.total + ' monedas', 'stage-title big'));
-      var list = el('div', null, 'reveal-list');
-      g.roster.forEach(function (id) {
-        var ok = r.correct.indexOf(id) !== -1;
-        var row2 = el('div', null, 'reveal-row' + (ok ? ' hit' : ''));
-        row2.appendChild(el('span', (ok ? '✅ ' : '') + playerName(id) + (id === S.playerId ? ' (tú)' : '')));
-        row2.appendChild(el('span', '✊ ' + (r.hides[id] || 0) + ' 🪙', 'fist'));
-        row2.appendChild(el('span', 'dijo ' + (r.guesses[id] !== undefined ? r.guesses[id] : '—'), 'muted'));
-        list.appendChild(row2);
-      });
-      st.appendChild(list);
-      return;
-    }
-
-    if (!inRoster()) return;
-
-    if (g.state === 'hiding' && g.myHide === null) {
-      var minH2 = g.round === 1 ? 1 : 0;
-      st.appendChild(el('p', '¿Cuántas escondes?' + (g.round === 1 ? ' (mínimo 1)' : ''), 'stage-title'));
-      var row = el('div', null, 'numpad');
-      for (var i = minH2; i <= L.START_COINS; i++) {
-        (function (n) {
-          var btn = el('button', String(n), 'num' + (S.selHide === n ? ' sel' : ''));
-          btn.onclick = function () { S.selHide = n; renderStage(); renderActions(); };
-          row.appendChild(btn);
-        })(i);
-      }
-      st.appendChild(row);
-    } else if (g.state === 'guessing') {
-      if (g.guessOrder.length) {
-        var gl = el('div', null, 'guesses');
-        g.guessOrder.forEach(function (id) {
-          var v = g.guesses[id];
-          var chip = el('div', null, 'guess-chip' + (v === undefined ? ' pending' : ''));
-          chip.appendChild(el('span', playerName(id)));
-          chip.appendChild(el('strong', v === undefined ? '…' : String(v)));
-          gl.appendChild(chip);
-        });
-        st.appendChild(gl);
-      }
-      if (g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
-        st.appendChild(el('p', 'Di un número del 0 al ' + g.maxTotal + ' (sin repetir):', 'stage-title'));
-        var used = {};
-        Object.keys(g.guesses).forEach(function (id) { used[g.guesses[id]] = true; });
-        var pad = el('div', null, 'numpad');
-        for (var n2 = 0; n2 <= g.maxTotal; n2++) {
-          (function (n) {
-            var b = el('button', String(n), 'num' + (S.selGuess === n ? ' sel' : ''));
-            b.disabled = !!used[n];
-            b.onclick = function () { S.selGuess = n; renderStage(); renderActions(); };
-            pad.appendChild(b);
-          })(n2);
-        }
-        st.appendChild(pad);
-      }
-    }
+    if (S.builtSeatsKey !== seatKey()) buildSeats();
+    Object.keys(S.seats).forEach(function (id) {
+      var st = S.seats[id];
+      var savedP = g.saved.indexOf(id) !== -1;
+      var inR = g.roster.indexOf(id) !== -1;
+      st.root.classList.toggle('salvado', savedP);
+      var active = inR && !savedP && g.state === 'guessing' && g.turnId === id && g.guesses[id] === undefined;
+      st.root.classList.toggle('activo', active);
+      // Bocadillo con el número anunciado (se esconde al resolver: el total va al centro).
+      var showBubble = inR && !savedP && g.state === 'guessing' && g.guesses[id] !== undefined;
+      st.bubble.classList.toggle('hidden', !showBubble);
+      if (showBubble) st.bubble.textContent = g.guesses[id];
+      // Estado bajo el nombre.
+      var txt = '';
+      if (savedP) txt = '✅';
+      else if (g.state === 'hiding') txt = (id === S.playerId && g.myHide !== null) ? '✊' : '💭';
+      else if (g.state === 'guessing') txt = active ? '🎯' : '';
+      else if (g.state === 'reveal' && g.lastReveal) txt = '🖐️' + (g.lastReveal.hides[id] || 0) + '🪙';
+      else if (g.finalDuel && inR) txt = '🎯' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN;
+      st.estado.textContent = txt;
+    });
   }
 
   function renderActions() {
@@ -786,11 +759,35 @@
     }
     if (!inRoster()) return;
     if (g.state === 'hiding' && g.myHide === null) {
+      var minH = g.round === 1 ? 1 : 0;
+      box.appendChild(el('p', '¿Cuántas escondes?' + (g.round === 1 ? ' (mínimo 1)' : ''), 'pad-title'));
+      var row = el('div', null, 'numpad');
+      for (var i = minH; i <= L.START_COINS; i++) {
+        (function (n) {
+          var btn = el('button', String(n), 'num' + (S.selHide === n ? ' sel' : ''));
+          btn.onclick = function () { S.selHide = n; renderActions(); };
+          row.appendChild(btn);
+        })(i);
+      }
+      box.appendChild(row);
       var b = el('button', 'Esconder ✊', 'btn btn-big');
       b.disabled = S.selHide === null;
       b.onclick = doHide;
       box.appendChild(b);
     } else if (g.state === 'guessing' && g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
+      box.appendChild(el('p', 'Di un número del 0 al ' + g.maxTotal + ' (sin repetir):', 'pad-title'));
+      var used = {};
+      Object.keys(g.guesses).forEach(function (id) { used[g.guesses[id]] = true; });
+      var pad = el('div', null, 'numpad');
+      for (var n2 = 0; n2 <= g.maxTotal; n2++) {
+        (function (n) {
+          var bb = el('button', String(n), 'num' + (S.selGuess === n ? ' sel' : ''));
+          bb.disabled = !!used[n];
+          bb.onclick = function () { S.selGuess = n; renderActions(); };
+          pad.appendChild(bb);
+        })(n2);
+      }
+      box.appendChild(pad);
       var b2 = el('button', 'Adivinar 🎯', 'btn btn-big');
       b2.disabled = S.selGuess === null;
       b2.onclick = doGuess;

@@ -12,15 +12,24 @@ function makeEl(tag) {
     _listeners: {},
     addEventListener(ev, fn) { (e._listeners[ev] = e._listeners[ev] || []).push(fn); },
     fire(ev) { (e._listeners[ev] || []).forEach(fn => fn()); if (ev === 'click' && e.onclick) e.onclick(); },
-    classList: {
-      _s: new Set(),
-      toggle(c, force) { force === undefined ? (this._s.has(c) ? this._s.delete(c) : this._s.add(c)) : (force ? this._s.add(c) : this._s.delete(c)); },
-      add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); }
-    },
+    classList: null, // sincronizado con className (ver abajo)
     querySelectorAll() { return []; }, querySelector() { return null; },
     insertBefore(c) { e.children.unshift(c); return c; },
     remove() {},
   };
+  // classList <-> className sincronizados como en un navegador real
+  const clsSet = new Set();
+  e.classList = {
+    toggle(c, force) {
+      if (force === undefined) clsSet.has(c) ? clsSet.delete(c) : clsSet.add(c);
+      else force ? clsSet.add(c) : clsSet.delete(c);
+    },
+    add(c) { clsSet.add(c); }, remove(c) { clsSet.delete(c); }, contains(c) { return clsSet.has(c); }
+  };
+  Object.defineProperty(e, 'className', {
+    get() { return [...clsSet].join(' '); },
+    set(v) { clsSet.clear(); (v || '').split(' ').filter(Boolean).forEach(c => clsSet.add(c)); }
+  });
   Object.defineProperty(e, 'innerHTML', {
     get() { return e._html; },
     set(v) { e._html = v; e.children = []; }
@@ -59,6 +68,27 @@ function deepText(n) {
   (n.children || []).forEach(c => { t += ' ' + deepText(c); });
   return t;
 }
+function hasClass(n, c) { return (n.className || '').split(' ').indexOf(c) !== -1; }
+function findAllByClass(root, cls) {
+  const out = [];
+  const stack = [root];
+  while (stack.length) {
+    const n = stack.pop();
+    if (hasClass(n, cls)) out.push(n);
+    stack.push(...(n.children || []));
+  }
+  return out;
+}
+function numButtons(root) {
+  const out = [];
+  const stack = [root];
+  while (stack.length) {
+    const n = stack.pop();
+    if (n.tag && n.tag.indexOf('button') === 0 && /^\d+$/.test(n.textContent) && !n.disabled) out.push(n);
+    stack.push(...(n.children || []));
+  }
+  return out;
+}
 function findBtn(root, text, includeDisabled) {
   const stack = [root];
   while (stack.length) {
@@ -91,8 +121,9 @@ try {
   fireClick($('btn-solo'));
   fireClick($('btn-solo-start')); // 3 rivales por defecto
   ok(!$('screen-game').classList.contains('hidden'), 'empieza la partida en solitario');
+  ok(findAllByClass($('mesa'), 'asiento').length === 4, '4 asientos alrededor de la mesa (yo + 3 IA)');
 
-  let steps = 0, gameOvers = 0, restarts = 0, sawRound1Min1 = false;
+  let steps = 0, gameOvers = 0, restarts = 0, sawRound1Min1 = false, sawBubble = false, sawCentroTotal = false;
   while (steps++ < 800) {
     if (!$('modal').classList.contains('hidden')) {
       const txt = deepText($('modal-panel'));
@@ -107,37 +138,42 @@ try {
       }
       break;
     }
-    const actions = $('actions'), stage = $('stage');
+    const actions = $('actions'), mesa = $('mesa');
     const escBtn = findBtn(actions, 'Esconder ✊', true);
     const advBtn = findBtn(actions, 'Adivinar 🎯', true);
     const nextBtn = findBtn(actions, '▶ Siguiente ronda') || findBtn(actions, '⚔️ Empezar el duelo');
     if (escBtn && escBtn.disabled) {
       // En la ronda 1 el 0 no debe ofrecerse (mínimo 1 moneda)
-      const nums = [];
-      const stack = [stage];
-      while (stack.length) {
-        const n = stack.pop();
-        if (n.tag && n.tag.indexOf('button') === 0 && /^\d+$/.test(n.textContent)) nums.push(n.textContent);
-        stack.push(...(n.children || []));
-      }
+      const nums = numButtons(actions).map(b => b.textContent);
       if (/Ronda 1/.test(deepText($('game-round')))) {
         ok(nums.indexOf('0') === -1 && nums.indexOf('1') !== -1, 'ronda 1: esconder ofrece 1-3 (sin 0): [' + nums.join(',') + ']');
         sawRound1Min1 = true;
       }
-      if (!clickNum(stage, 1)) throw new Error('no hay botón de número para esconder');
+      if (!clickNum(actions, 1)) throw new Error('no hay botón de número para esconder');
       const b = findBtn(actions, 'Esconder ✊');
       if (!b) throw new Error('Esconder no se habilitó tras elegir');
       fireClick(b);
     } else if (advBtn && advBtn.disabled) {
-      if (!clickNum(stage, 2)) throw new Error('no hay botón de número para adivinar');
+      if (!clickNum(actions, 2)) throw new Error('no hay botón de número para adivinar');
       const b = findBtn(actions, 'Adivinar 🎯');
       if (b) fireClick(b);
     } else if (nextBtn) {
       fireClick(nextBtn);
     } else {
-      throw new Error('estado desconocido. banner="' + $('turn-banner').textContent + '"');
+      throw new Error('estado desconocido. centro="' + deepText($('mesa-centro')) + '"');
+    }
+    // Durante la fase de apuestas debe haber bocadillos visibles;
+    // al resolver, el total aparece en grande en el centro de la mesa.
+    const centroTxt = deepText($('mesa-centro'));
+    if (/🎯/.test(centroTxt)) {
+      if (findAllByClass(mesa, 'bocadillo').some(x => !hasClass(x, 'hidden'))) sawBubble = true;
+    } else if (/Total|total/.test(centroTxt) || /\d/.test(centroTxt)) {
+      const totalEl = findAllByClass($('mesa-centro'), 'centro-total');
+      if (totalEl.length) sawCentroTotal = true;
     }
   }
+  ok(sawBubble, 'las apuestas aparecen en bocadillos junto a cada jugador');
+  ok(sawCentroTotal, 'al resolver, el total aparece en el centro de la mesa');
   ok(sawRound1Min1, 'se verificó el mínimo de 1 moneda en la ronda 1');
   ok(gameOvers >= 1, 'la partida termina (' + gameOvers + ' finales, ' + restarts + ' reinicio)');
   ok(steps < 800, 'sin bucles infinitos (' + steps + ' pasos)');
