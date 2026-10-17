@@ -135,13 +135,18 @@ try {
   ok(!$('screen-game').classList.contains('hidden'), 'empieza la partida en solitario');
   ok(findAllByClass($('mesa'), 'asiento').length === 4, '4 asientos alrededor de la mesa (yo + 3 IA)');
 
-  let steps = 0, gameOvers = 0, restarts = 0, sawRound1Min1 = false, sawBubble = false, sawCentroTotal = false;
+  let steps = 0, gameOvers = 0, restarts = 0, sawRound1Min1 = false, sawBubble = false, sawCentroTotal = false, sawDuelScore = false;
   while (steps++ < 800) {
     if (!$('modal').classList.contains('hidden')) {
       const txt = deepText($('modal-panel'));
       gameOvers++;
-      ok(/pringado|gana el duelo|Todos salvados/.test(txt), 'modal de fin muestra resultado: ' + txt.slice(0, 70));
+      ok(/pringado|gana el duelo|Todos salvados/i.test(txt), 'modal de fin muestra resultado: ' + txt.slice(0, 70));
       ok(findAllByClass($('modal-panel'), 'rank-row').length >= 2, 'el modal muestra la clasificación final');
+      ok(findAllByClass($('modal-panel'), 'rank-row').filter(x => hasClass(x, 'champion')).length === 1,
+        'el 1º lleva corona y laureles');
+      if (/Pringado/.test(txt)) {
+        ok(findAllByClass($('modal-panel'), 'pringado-card').length === 1, 'el pringado va en tarjeta aparte');
+      }
       ok(countTag($('stats-table'), 'tr') >= 2, 'la tabla de estadísticas tiene datos');
       if (restarts === 0) {
         const again = findBtn($('modal-panel'), 'Jugar otra vez');
@@ -178,6 +183,7 @@ try {
     }
     // Durante la fase de apuestas debe haber bocadillos visibles;
     // al resolver, el total aparece en grande en el centro de la mesa.
+    // En el duelo, el marcador de victorias está siempre arriba.
     const centroTxt = deepText($('mesa-centro'));
     if (/Te toca|Turno de/.test(centroTxt)) {
       if (findAllByClass(mesa, 'bocadillo').some(x => !hasClass(x, 'hidden'))) sawBubble = true;
@@ -185,11 +191,16 @@ try {
       const totalEl = findAllByClass($('mesa-centro'), 'centro-total');
       if (totalEl.length) sawCentroTotal = true;
     }
+    if (!$('duel-score').classList.contains('hidden')) {
+      const ds = deepText($('duel-score'));
+      if (/\d+\s*—\s*\d+/.test(ds)) sawDuelScore = true;
+    }
   }
   ok(sawBubble, 'las apuestas aparecen en bocadillos junto a cada jugador');
   ok(sawCentroTotal, 'al resolver, el total aparece en el centro de la mesa');
   ok(sawRound1Min1, 'se verificó el mínimo de 1 moneda en la ronda 1');
   ok(gameOvers >= 1, 'la partida termina (' + gameOvers + ' finales, ' + restarts + ' reinicio)');
+  if (sawDuelScore) console.log('ok: marcador del duelo visible durante el duelo');
   ok(steps < 800, 'sin bucles infinitos (' + steps + ' pasos)');
 } catch (e) {
   fails++;

@@ -74,6 +74,7 @@
     think: '<path d="M21 11.5a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.4-.3-3.4-.8L4 19.5l1.3-2.6A7.5 7.5 0 1 1 21 11.5z"/><circle cx="9" cy="11.5" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="11.5" r="1" fill="currentColor" stroke="none"/><circle cx="17" cy="11.5" r="1" fill="currentColor" stroke="none"/>',
     medal: '<circle cx="12" cy="14.5" r="4.5"/><path d="M9.2 10.8L6.5 3.5h3.8l1.7 3.6 1.7-3.6h3.8l-2.7 7.3"/>',
     crown: '<path d="M3 8.5l3.8 3.2L12 5.5l5.2 6.2L21 8.5l-1.6 9H4.6z"/>',
+    laurels: '<path d="M7 21C4.5 15.5 5.5 9.5 10 5" fill="none"/><ellipse cx="5.9" cy="17.6" rx="2.1" ry="1" transform="rotate(-48 5.9 17.6)" fill="currentColor" stroke="none"/><ellipse cx="5.5" cy="14.2" rx="2.1" ry="1" transform="rotate(-32 5.5 14.2)" fill="currentColor" stroke="none"/><ellipse cx="6.2" cy="10.8" rx="2.1" ry="1" transform="rotate(-16 6.2 10.8)" fill="currentColor" stroke="none"/><ellipse cx="7.8" cy="7.8" rx="2.1" ry="1" transform="rotate(0 7.8 7.8)" fill="currentColor" stroke="none"/>',
     frown: '<circle cx="12" cy="12" r="9"/><path d="M8.5 16.5s1.4-2.6 3.5-2.6 3.5 2.6 3.5 2.6"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>'
   };
   function icon(n) {
@@ -787,8 +788,27 @@
   }
 
   // ---------- render ----------
+  // Marcador del duelo arriba: victorias de cada duelista, siempre visible.
+  function renderDuelScore() {
+    var d = $('duel-score');
+    var g = S.game;
+    if (!g || !g.finalDuel || g.state === 'gameOver' || g.roster.length !== 2) {
+      d.classList.add('hidden');
+      return;
+    }
+    d.classList.remove('hidden');
+    var a = g.roster[0], b = g.roster[1];
+    d.innerHTML = '';
+    d.appendChild(el('span', playerName(a), 'ds-name'));
+    var sc = el('span', null, 'ds-score');
+    sc.innerHTML = '<b>' + (g.hits[a] || 0) + '</b> — <b>' + (g.hits[b] || 0) + '</b>';
+    d.appendChild(sc);
+    d.appendChild(el('span', playerName(b), 'ds-name'));
+    d.appendChild(el('span', 'primero en ' + L.FINAL_HITS_TO_WIN, 'ds-sub'));
+  }
+
   function renderAll() {
-    renderCentro(); renderMesa(); renderActions(); renderScores(); renderStats();
+    renderDuelScore(); renderCentro(); renderMesa(); renderActions(); renderScores(); renderStats();
     $('game-round').textContent = S.game && S.game.finalDuel
       ? 'Duelo final'
       : 'Ronda ' + (S.game ? S.game.round : 1);
@@ -905,6 +925,16 @@
     S.builtSeatsKey = seatKey();
   }
 
+  // Avatar reutilizable: foto, robot de la IA o inicial.
+  function avatarEl(id, cls) {
+    var av = el('div', null, 'avatar' + (cls ? ' ' + cls : ''));
+    var photo = playerPhoto(id);
+    if (photo) av.style.backgroundImage = 'url("' + photo + '")';
+    else if (isAI(id)) av.innerHTML = icon('bot');
+    else av.textContent = (playerName(id) || '?').charAt(0).toUpperCase();
+    return av;
+  }
+
   // Anuncio grande encima de la mesa (quién se salva / quién pringa),
   // para que lo vea toda la mesa. No bloquea: se esconde solo.
   function showTableOverlay(ids, tagText, tagClass) {
@@ -912,12 +942,7 @@
     ov.innerHTML = '';
     ids.forEach(function (id) {
       var item = el('div', null, 'saved-star' + (tagClass ? ' ' + tagClass : ''));
-      var av = el('div', null, 'avatar big');
-      var photo = playerPhoto(id);
-      if (photo) av.style.backgroundImage = 'url("' + photo + '")';
-      else if (isAI(id)) av.innerHTML = icon('bot');
-      else av.textContent = (playerName(id) || '?').charAt(0).toUpperCase();
-      item.appendChild(av);
+      item.appendChild(avatarEl(id, 'big'));
       item.appendChild(el('div', playerName(id), 'saved-name'));
       item.appendChild(el('div', tagText, 'saved-tag' + (tagClass ? ' ' + tagClass : '')));
       ov.appendChild(item);
@@ -1062,9 +1087,10 @@
   }
 
   function buildRanking(p) {
-    // Orden: ganador del duelo primero, luego salvados por ronda, pringado al final.
+    // Orden por salvación: el primero en salvarse, primero en el ranking.
+    // (El pringado va aparte, no en la lista.)
     var order = [];
-    function push(id) { if (id && order.indexOf(id) === -1) order.push(id); }
+    function push(id) { if (id && id !== p.loserId && order.indexOf(id) === -1) order.push(id); }
     var savedSorted = (p.saved || []).slice().sort(function (a, b) {
       var ra = (S.stats[a] && S.stats[a].rondaSalvado) || 99;
       var rb = (S.stats[b] && S.stats[b].rondaSalvado) || 99;
@@ -1072,7 +1098,6 @@
     });
     if (p.finalDuel && p.winnerId) push(p.winnerId);
     savedSorted.forEach(push);
-    if (p.loserId) push(p.loserId);
     return order;
   }
 
@@ -1087,13 +1112,20 @@
   function showGameOverModal(p) {
     var g = S.game;
     var wrap = el('div');
+    // El pringado, por un lado y bien visible.
+    if (p.loserId) {
+      var pc = el('div', null, 'pringado-card');
+      pc.appendChild(el('div', 'Pringado', 'pringado-tag'));
+      pc.appendChild(avatarEl(p.loserId, 'big'));
+      pc.appendChild(el('div', playerName(p.loserId) + (p.loserId === S.playerId ? ' (tú)' : ''), 'pringado-name'));
+      wrap.appendChild(pc);
+    }
     if (p.finalDuel) {
       var wicon = el('div', null, 'winner'); wicon.innerHTML = icon('trophy'); wrap.appendChild(wicon);
       var h = el('h2', '¡' + playerName(p.winnerId) + ' gana el duelo!');
       h.style.textAlign = 'center';
       wrap.appendChild(h);
-      var sub = el('p', 'Acertó ' + L.FINAL_HITS_TO_WIN + ' rondas antes que nadie. ' +
-        (p.loserId ? playerName(p.loserId) + ' es el pringado.' : ''), 'muted');
+      var sub = el('p', 'Acertó ' + L.FINAL_HITS_TO_WIN + ' rondas antes que nadie.', 'muted');
       sub.style.textAlign = 'center'; sub.style.color = '#555';
       wrap.appendChild(sub);
     } else if (p.everyoneSaved) {
@@ -1104,24 +1136,31 @@
       var sub2 = el('p', 'No hay pringado esta vez.', 'muted');
       sub2.style.textAlign = 'center'; sub2.style.color = '#555';
       wrap.appendChild(sub2);
-    } else {
-      var wicon3 = el('div', null, 'winner'); wicon3.innerHTML = icon('frown'); wrap.appendChild(wicon3);
-      var h3 = el('h2', '¡' + playerName(p.loserId) + ' es el pringado!');
+    } else if (!p.loserId) {
+      var wicon3 = el('div', null, 'winner'); wicon3.innerHTML = icon('check'); wrap.appendChild(wicon3);
+      var h3 = el('h2', '¡Partida terminada!');
       h3.style.textAlign = 'center';
       wrap.appendChild(h3);
-      var sub3 = el('p', 'Todos los demás quedaron salvados: ' + (p.saved || []).map(playerName).join(', '), 'muted');
-      sub3.style.textAlign = 'center'; sub3.style.color = '#555';
-      wrap.appendChild(sub3);
     }
-    // Clasificación final de la partida.
+    // Clasificación: por orden de salvación; el 1º con corona de oro y laureles.
     wrap.appendChild(el('h3', 'Clasificación', 'rank-title'));
     var rankList = el('div', null, 'rank-list');
     buildRanking(p).forEach(function (id, i) {
-      var row = el('div', null, 'rank-row' + (id === p.loserId ? ' pringado' : ''));
-      row.innerHTML = i === 0 ? icon('crown') : '<span class="rank-pos">' + (i + 1) + '</span>';
+      var row = el('div', null, 'rank-row' + (i === 0 ? ' champion' : ''));
       var box = el('div');
-      var nm = el('div', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'rank-name');
-      box.appendChild(nm);
+      if (i === 0) {
+        row.appendChild(el('span', '👑', 'rank-crown'));
+        var champ = el('div', null, 'rank-champ-name');
+        var l1 = el('span', null, 'laurel'); l1.innerHTML = icon('laurels');
+        var l2 = el('span', null, 'laurel flip'); l2.innerHTML = icon('laurels');
+        champ.appendChild(l1);
+        champ.appendChild(el('span', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'rank-name'));
+        champ.appendChild(l2);
+        box.appendChild(champ);
+      } else {
+        row.appendChild(el('span', String(i + 1), 'rank-pos'));
+        box.appendChild(el('div', playerName(id) + (id === S.playerId ? ' (tú)' : ''), 'rank-name'));
+      }
       box.appendChild(el('div', rankingDetail(id, p), 'muted rank-det'));
       row.appendChild(box);
       rankList.appendChild(row);

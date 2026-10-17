@@ -185,6 +185,19 @@ i[data-icon] .ic { width: 1.3em; height: 1.3em; vertical-align: -0.3em; }
   border: 9px solid transparent; border-top-color: #fff;
 }
 
+/* Marcador del duelo: victorias de cada uno, siempre visible arriba */
+#duel-score {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin: 6px auto 2px; padding: 8px 20px; width: fit-content; max-width: 100%;
+  background: rgba(0,0,0,.38); border: 1px solid rgba(245,197,66,.45); border-radius: 26px;
+  color: #fff; font-size: 17px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+#duel-score.hidden { display: none; }
+.ds-name { font-weight: bold; }
+.ds-score b { font-size: 26px; color: var(--gold); padding: 0 2px; }
+.ds-score { color: #888; font-size: 20px; }
+.ds-sub { font-size: 12px; color: #bbb; }
+
 /* Anuncio grande encima de la mesa: quién se salva / quién pringa */
 #saved-overlay {
   position: absolute; inset: 0; z-index: 5;
@@ -246,6 +259,27 @@ i[data-icon] .ic { width: 1.3em; height: 1.3em; vertical-align: -0.3em; }
   font-weight: bold; font-size: 13px;
 }
 .rank-row.pringado { opacity: .75; }
+.rank-row.champion {
+  background: linear-gradient(135deg, rgba(245,197,66,.28), rgba(245,197,66,.08));
+  border: 1px solid rgba(245,197,66,.65);
+}
+.rank-crown { font-size: 30px; flex-shrink: 0; }
+.rank-champ-name { display: flex; align-items: center; gap: 8px; }
+.rank-champ-name .rank-name { color: #b8860b; font-size: 18px; }
+.laurel .ic { width: 26px; height: 26px; color: #b8860b; }
+.laurel.flip .ic { transform: scaleX(-1); }
+/* Pringado destacado, por un lado */
+.pringado-card {
+  text-align: center; padding: 14px 12px; margin-bottom: 6px;
+  background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.45); border-radius: 16px;
+}
+.pringado-tag {
+  display: inline-block; background: #ff6b6b; color: #3d0a0a; font-weight: bold;
+  padding: 5px 18px; border-radius: 18px; font-size: 15px; margin-bottom: 10px;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.pringado-card .avatar.big { width: 84px; height: 84px; margin: 0 auto; font-size: 36px; border-color: #ff6b6b; }
+.pringado-name { font-size: 20px; font-weight: bold; margin-top: 8px; }
 .rank-name { font-weight: bold; }
 .rank-det { font-size: 13px; }
 .scoreboard summary { cursor: pointer; color: var(--gold); font-weight: bold; }
