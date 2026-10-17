@@ -59,7 +59,7 @@
 
   // ---------- iconos SVG modernos (en vez de emojis básicos) ----------
   var ICON_PATHS = {
-    fist: '<path d="M7.2 12.2V8.5a1.5 1.5 0 0 1 3 0v3.7"/><path d="M10.2 12.2V6.8a1.5 1.5 0 0 1 3 0v5.4"/><path d="M13.2 12.2V8.5a1.5 1.5 0 0 1 3 0v5.2"/><path d="M7.2 12.2c-1.2 0-2.1-1-2.1-2.1v-1a1.6 1.6 0 0 1 3.1-.5"/><path d="M7.2 12.2v4.3a4 4 0 0 0 4 4h2.3a4 4 0 0 0 4-4v-2.3a2 2 0 0 0-2-2H9.2a2 2 0 0 0-2 2z"/>',
+    fist: '<g fill="currentColor" stroke="none"><rect x="4.8" y="7.2" width="3.4" height="6.4" rx="1.7"/><rect x="8.7" y="5.6" width="3.4" height="8" rx="1.7"/><rect x="12.9" y="5.6" width="3.4" height="8" rx="1.7"/><rect x="17.1" y="7.2" width="3.4" height="6.4" rx="1.7"/><rect x="4.5" y="13" width="15" height="3.1" rx="1.55"/><path d="M5.5 16.6h13a1.9 1.9 0 0 1 1.9 1.9v.6a3.9 3.9 0 0 1-3.9 3.9H7.5a3.9 3.9 0 0 1-3.9-3.9v-.6a1.9 1.9 0 0 1 1.9-1.9z"/></g>',
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
     trophy: '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5.5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5C3 10 5 12 7.5 12"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5C21 10 19 12 16.5 12"/>',
@@ -881,8 +881,8 @@
     var n = order.length;
     order.forEach(function (id, i) {
       var ang = Math.PI / 2 + i * (2 * Math.PI / n); // empiezo abajo, sentido horario
-      var x = 50 + 43 * Math.cos(ang);
-      var y = 50 + 43 * Math.sin(ang);
+      var x = 50 + 45 * Math.cos(ang);
+      var y = 50 + 45 * Math.sin(ang);
       var s = el('div', null, 'asiento');
       s.style.left = x.toFixed(2) + '%';
       s.style.top = y.toFixed(2) + '%';
