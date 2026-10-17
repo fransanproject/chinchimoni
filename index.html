@@ -28,16 +28,26 @@
       <input type="text" id="input-code" maxlength="4" placeholder="CÓDIGO" class="code-input" autocomplete="off" style="max-width:170px">
       <button id="btn-join" class="btn btn-big">Unirse</button>
     </div>
+    <div class="divider">— o —</div>
+    <div class="row">
+      <button id="btn-solo" class="btn btn-big">🤖 Jugar solo contra la IA</button>
+    </div>
+    <div id="solo-setup" class="hidden" style="margin-top:12px;text-align:center">
+      <p class="muted" style="margin:6px 0">¿Cuántos rivales?</p>
+      <div class="row" id="solo-count"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="btn-solo-start" class="btn">Empezar</button>
+      </div>
+    </div>
     <p id="home-error" class="error"></p>
   </div>
   <details class="rules">
     <summary>¿Cómo se juega?</summary>
     <ul>
-      <li>Cada jugador empieza con <b>3 monedas</b> 🪙🪙🪙.</li>
       <li>Cada ronda, todos esconden <b>a la vez</b> 0, 1, 2 o 3 monedas en el puño ✊.</li>
-      <li>Por turnos, cada jugador <b>dice un número</b>: su apuesta de cuántas monedas suman <b>entre todos</b>. No se puede repetir un número ya dicho.</li>
-      <li>¡Manos arriba! 🖐️ Quien haya <b>acertado la suma exacta</b> descarta una moneda.</li>
-      <li>Gana el <b>primero en quedarse sin monedas</b> 🏆.</li>
+      <li>Por turnos (rotando quién empieza), cada jugador <b>dice un número</b>: su apuesta de cuántas monedas suman <b>entre todos</b>. No se puede repetir un número ya dicho.</li>
+      <li>¡Manos arriba! 🖐️ Quien <b>acierte la suma exacta</b> queda <b>salvado</b> ✅ y no juega más. En la primera ronda nadie queda salvado.</li>
+      <li>Cuando solo quedan <b>2 jugadores</b>: ⚔️ <b>duelo final</b>, el primero en acertar <b>3 rondas</b> se salva. El otro es el pringado 😅.</li>
       <li>🤫 Lo que escondes viaja por la sala: no cotillees la consola del navegador, tramposo.</li>
     </ul>
   </details>

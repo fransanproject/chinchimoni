@@ -2,13 +2,14 @@
  * Chinchimoni — el juego de las monedas escondidas (los chinos).
  * Lógica pura, sin DOM ni red: se puede probar con node.
  *
- * Reglas de la casa (v1):
- *  - Cada jugador empieza con 3 monedas.
- *  - Cada ronda, todos esconden en el puño 0..(sus monedas) a la vez.
- *  - Por turnos (rotando quién empieza), cada jugador dice un número:
- *    su apuesta de la suma total escondida. No se puede repetir número.
- *  - Se abren los puños: quien acertó la suma exacta descarta 1 moneda.
- *  - Gana el primero en quedarse sin monedas.
+ * Reglas de la casa (v2):
+ *  - Cada jugador esconde en el puño 0..3 monedas a la vez.
+ *  - Por turnos (rotando quién empieza), cada jugador apuesta la suma
+ *    total. No se puede repetir número.
+ *  - Quien acierta en una ronda queda SALVADO y no juega más.
+ *    (En la primera ronda nadie queda salvado.)
+ *  - Cuando solo quedan 2 jugadores: DUELO FINAL, el primero en
+ *    acertar 3 rondas se salva; el otro es el pringado.
  * ============================================================ */
 
 var Chinchimoni = (function () {
@@ -16,6 +17,7 @@ var Chinchimoni = (function () {
 
   var MAX_PLAYERS = 12;
   var START_COINS = 3;
+  var FINAL_HITS_TO_WIN = 3; // en el duelo final, el primero en acertar 3 rondas se salva
 
   // Suma máxima que se puede apostar = total de monedas en juego.
   function maxTotal(coins) {
@@ -41,23 +43,14 @@ var Chinchimoni = (function () {
     return Object.keys(guesses).filter(function (id) { return guesses[id] === total; });
   }
 
-  // Aplica el descarte de los acertantes. Devuelve {coins, winners}.
-  function applyRound(coins, correct) {
-    var next = {};
-    Object.keys(coins).forEach(function (id) { next[id] = coins[id]; });
-    correct.forEach(function (id) { if (next[id] > 0) next[id]--; });
-    var winners = Object.keys(next).filter(function (id) { return next[id] === 0; });
-    return { coins: next, winners: winners };
-  }
-
   return {
     MAX_PLAYERS: MAX_PLAYERS,
     START_COINS: START_COINS,
+    FINAL_HITS_TO_WIN: FINAL_HITS_TO_WIN,
     maxTotal: maxTotal,
     turnOrder: turnOrder,
     roundTotal: roundTotal,
-    correctGuessers: correctGuessers,
-    applyRound: applyRound
+    correctGuessers: correctGuessers
   };
 })();
 
