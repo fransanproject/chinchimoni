@@ -59,7 +59,7 @@
 
   // ---------- iconos SVG modernos (en vez de emojis básicos) ----------
   var ICON_PATHS = {
-    fist: '<path d="M7 12V7.2a1.5 1.5 0 0 1 3 0V11"/><path d="M10 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M13 11V7.2a1.5 1.5 0 0 1 3 0V13"/><path d="M7 12a2 2 0 0 1-2-2V8.6A1.6 1.6 0 0 1 8.2 8.6"/><path d="M7 12v5a4 4 0 0 0 4 4h2.5a4 4 0 0 0 4-4v-4a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2z"/>',
+    fist: '<path d="M7.2 12.2V8.5a1.5 1.5 0 0 1 3 0v3.7"/><path d="M10.2 12.2V6.8a1.5 1.5 0 0 1 3 0v5.4"/><path d="M13.2 12.2V8.5a1.5 1.5 0 0 1 3 0v5.2"/><path d="M7.2 12.2c-1.2 0-2.1-1-2.1-2.1v-1a1.6 1.6 0 0 1 3.1-.5"/><path d="M7.2 12.2v4.3a4 4 0 0 0 4 4h2.3a4 4 0 0 0 4-4v-2.3a2 2 0 0 0-2-2H9.2a2 2 0 0 0-2 2z"/>',
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
     coins: '<ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/><path d="M5 11.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
@@ -759,23 +759,35 @@
   }
 
   // Centro de la mesa: el estado de la partida, siempre visible.
+  // Quien está salvado mira la partida igual que los demás (solo no participa).
   function renderCentro() {
     var c = $('mesa-centro');
     c.innerHTML = '';
+    c.className = '';
     var g = S.game;
     if (!g) return;
     var big = el('div', null, 'centro-big');
     var sub = el('div', null, 'centro-sub');
-    if (!inRoster()) {
-      if (isSaved()) { big.innerHTML = icon('check'); sub.textContent = 'Estás salvado'; }
-      else { big.innerHTML = icon('eye'); sub.textContent = 'Entras en la próxima ronda'; }
+    var watching = !inRoster(); // salvado o a la espera: mira sin jugar
+    var savedMe = isSaved();
+
+    if (watching && !savedMe) {
+      big.innerHTML = icon('eye');
+      sub.textContent = 'Entras en la próxima ronda';
     } else if (g.state === 'hiding') {
+      c.className = 'fase-hiding';
       big.innerHTML = icon('fist');
-      sub.textContent = g.myHide === null
-        ? 'Esconde (' + g.hideDone + '/' + g.hideTotal + ')' + (g.round === 1 ? ' · mín. 1' : '')
-        : 'Puño cerrado (' + g.hideDone + '/' + g.hideTotal + ')';
+      if (watching) {
+        sub.textContent = 'Escondiendo (' + g.hideDone + '/' + g.hideTotal + ')';
+      } else {
+        sub.textContent = g.myHide === null
+          ? 'Esconde (' + g.hideDone + '/' + g.hideTotal + ')' + (g.round === 1 ? ' · mín. 1' : '')
+          : 'Puño cerrado (' + g.hideDone + '/' + g.hideTotal + ')';
+      }
+      if (savedMe) sub.textContent += ' · estás salvado';
     } else if (g.state === 'guessing') {
-      var myTurn = g.turnId === S.playerId && g.guesses[S.playerId] === undefined;
+      c.className = 'fase-guessing';
+      var myTurn = !watching && g.turnId === S.playerId && g.guesses[S.playerId] === undefined;
       var firstToSay = Object.keys(g.guesses).length === 0;
       if (g.finalDuel && myTurn && firstToSay) {
         // Aviso explícito: en el duelo sales tú primero diciendo.
@@ -785,8 +797,10 @@
       } else {
         big.innerHTML = icon('target');
         sub.textContent = myTurn ? 'Te toca adivinar' : 'Turno de ' + playerName(g.turnId);
+        if (savedMe) sub.textContent += ' · estás salvado';
       }
     } else if (g.state === 'reveal' && g.lastReveal) {
+      c.className = 'fase-reveal';
       var r = g.lastReveal;
       big.textContent = r.total;
       big.className = 'centro-total';
@@ -869,13 +883,13 @@
       var showBubble = inR && !savedP && g.state === 'guessing' && g.guesses[id] !== undefined;
       st.bubble.classList.toggle('hidden', !showBubble);
       if (showBubble) st.bubble.textContent = g.guesses[id];
-      // Estado bajo el nombre (iconos modernos).
+      // Estado bajo el nombre (iconos modernos, con color por fase).
       var html = '';
-      if (savedP && id === S.playerId) html = icon('check');
-      else if (g.state === 'hiding') html = (id === S.playerId && g.myHide !== null) ? icon('fist') : icon('think');
-      else if (g.state === 'guessing' && active) html = icon('target');
-      else if (g.state === 'reveal' && g.lastReveal) html = icon('coins') + ' <b>' + (g.lastReveal.hides[id] || 0) + '</b>';
-      else if (g.finalDuel && inR && g.state !== 'reveal') html = icon('target') + ' <b>' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + '</b>';
+      if (savedP && id === S.playerId) html = '<span class="est-check">' + icon('check') + '</span>';
+      else if (g.state === 'hiding') html = '<span class="est-fist">' + ((id === S.playerId && g.myHide !== null) ? icon('fist') : icon('think')) + '</span>';
+      else if (g.state === 'guessing' && active) html = '<span class="est-target">' + icon('target') + '</span>';
+      else if (g.state === 'reveal' && g.lastReveal) html = '<span class="est-coins">' + icon('coins') + '</span> <b>' + (g.lastReveal.hides[id] || 0) + '</b>';
+      else if (g.finalDuel && inR && g.state !== 'reveal') html = '<span class="est-target">' + icon('target') + '</span> <b>' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + '</b>';
       st.estado.innerHTML = html;
     });
   }
