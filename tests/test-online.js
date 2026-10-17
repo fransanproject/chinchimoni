@@ -94,6 +94,7 @@ function newClient(name) {
   const sandbox = {
     console,
     setTimeout: (fn, ms) => { const id = timers.length + 1; timers.push({ id, fn, ms: ms || 0, dead: false }); return id; },
+    setInterval: () => 0,
     clearTimeout: (id) => { const t = timers.find(x => x.id === id); if (t) t.dead = true; },
     Math, JSON, Object, Array, String, Number,
     navigator: {},

@@ -43,6 +43,7 @@ const byId = {};
 const sandbox = {
   console,
   setTimeout: (fn) => { fn(); return 0; }, // inmediato: la IA juega al instante
+  setInterval: () => 0,
   clearTimeout: () => {},
   Math, JSON, Object, Array, String, Number,
   navigator: {},

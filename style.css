@@ -14,6 +14,15 @@ body {
 .screen { max-width: 920px; margin: 0 auto; padding: 20px 14px 40px; }
 .hidden { display: none !important; }
 
+/* Aviso de nueva versión */
+#update-banner {
+  position: sticky; top: 0; z-index: 200;
+  background: #f5c542; color: #3d2c00; font-weight: bold;
+  padding: 10px 14px; text-align: center; font-size: 15px;
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+}
+#update-banner .btn-small { background: #3d2c00; color: #ffe9a8; border: none; }
+
 /* ---------- home ---------- */
 .hero { text-align: center; margin: 30px 0 20px; }
 .hero .logo { font-size: 64px; }

@@ -1192,6 +1192,34 @@
     showModal(wrap);
   }
 
+  // ---------- actualización automática ----------
+  // Comprueba si hay una versión nueva publicada; si la hay, ofrece actualizar
+  // (los móviles guardan la vieja en caché y si no, las versiones no coinciden).
+  function checkForUpdate() {
+    if (!window.fetch) return;
+    fetch('version.txt?v=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      return r.ok ? r.text() : null;
+    }).then(function (txt) {
+      var v = txt ? parseInt(txt.trim(), 10) : 0;
+      if (v && v !== PROTO_V) showUpdateBanner(v);
+    }).catch(function () {});
+  }
+  function showUpdateBanner(v) {
+    if ($('update-banner')) return;
+    var b = el('div', null, 'update-banner');
+    b.id = 'update-banner';
+    b.innerHTML = '<span>Hay una nueva versión del juego (' + v + ').</span> ';
+    var btn = el('button', 'Actualizar', 'btn-small');
+    btn.onclick = function () {
+      // Cambiar la URL burla la caché del navegador/móvil.
+      location.href = location.pathname + '?v=' + v;
+    };
+    b.appendChild(btn);
+    document.body.insertBefore(b, document.body.firstChild);
+  }
+
   // ---------- arranque ----------
+  checkForUpdate();
+  setInterval(checkForUpdate, 60000); // re-comprueba cada minuto en el lobby
   showScreen('home');
 })();
