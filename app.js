@@ -349,7 +349,9 @@
   function onHide(p) {
     if (!S.isHost || !S.game || S.game.state !== 'hiding') return;
     if (S.game.roster.indexOf(p.playerId) === -1) return;
-    var n = Math.max(0, Math.min(L.START_COINS, p.count | 0));
+    // En la primera ronda hay que esconder mínimo 1 moneda.
+    var minHide = S.game.round === 1 ? 1 : 0;
+    var n = Math.max(minHide, Math.min(L.START_COINS, p.count | 0));
     S.host.hides[p.playerId] = n;
     var pr = presentIds();
     var need = S.game.roster.filter(function (id) { return pr[id]; });
@@ -438,8 +440,8 @@
       return;
     }
 
-    // Fase normal: en la primera ronda nadie queda salvado.
-    var newlySaved = g.round > 1 ? correct.slice() : [];
+    // Fase normal: quien acierta queda salvado (también en la ronda 1).
+    var newlySaved = correct.slice();
     var saved = g.saved.concat(newlySaved);
     var remaining = g.roster.filter(function (id) { return saved.indexOf(id) === -1; });
 
@@ -595,13 +597,14 @@
     var g = S.game;
     if (!g) return;
     var round = g.round;
+    var minH = round === 1 ? 1 : 0; // en la primera ronda mínimo 1 moneda
     g.roster.forEach(function (id, i) {
       if (!isAI(id)) return;
       setTimeout(function () {
         if (!S.game || S.game.round !== round) return;
         if (S.game.state !== 'hiding') return;
         if (S.host.hides[id] !== undefined) return;
-        submitHide(id, Math.floor(Math.random() * (L.START_COINS + 1)));
+        submitHide(id, minH + Math.floor(Math.random() * (L.START_COINS + 1 - minH)));
       }, 500 + i * 450);
     });
   }
@@ -650,7 +653,9 @@
     }
     if (g.state === 'hiding') {
       if (g.myHide === null) {
-        b.textContent = '✊ Esconde tus monedas en el puño (0–' + L.START_COINS + ')';
+        var minH = g.round === 1 ? 1 : 0;
+        b.textContent = '✊ Esconde tus monedas en el puño (' + minH + '–' + L.START_COINS + ')' +
+          (g.round === 1 ? ' — en la primera ronda mínimo 1' : '');
         b.classList.add('my-turn');
       } else {
         b.textContent = 'Puño cerrado… esperando al resto (' + g.hideDone + '/' + g.hideTotal + ')';
@@ -672,8 +677,6 @@
         msg += ' — aciertos: ' + hs;
       } else if (r.newlySaved && r.newlySaved.length) {
         msg += ' — ✅ salvados: ' + r.newlySaved.map(playerName).join(', ');
-      } else if (g.round === 1) {
-        msg += ' — en la primera ronda nadie queda salvado';
       } else {
         msg += ' — nadie acertó';
       }
@@ -728,9 +731,10 @@
     if (!inRoster()) return;
 
     if (g.state === 'hiding' && g.myHide === null) {
-      st.appendChild(el('p', '¿Cuántas escondes?', 'stage-title'));
+      var minH2 = g.round === 1 ? 1 : 0;
+      st.appendChild(el('p', '¿Cuántas escondes?' + (g.round === 1 ? ' (mínimo 1)' : ''), 'stage-title'));
       var row = el('div', null, 'numpad');
-      for (var i = 0; i <= L.START_COINS; i++) {
+      for (var i = minH2; i <= L.START_COINS; i++) {
         (function (n) {
           var btn = el('button', String(n), 'num' + (S.selHide === n ? ' sel' : ''));
           btn.onclick = function () { S.selHide = n; renderStage(); renderActions(); };

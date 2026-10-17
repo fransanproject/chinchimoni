@@ -7,7 +7,7 @@
  *  - Por turnos (rotando quién empieza), cada jugador apuesta la suma
  *    total. No se puede repetir número.
  *  - Quien acierta en una ronda queda SALVADO y no juega más.
- *    (En la primera ronda nadie queda salvado.)
+ *    (En la primera ronda hay que esconder mínimo 1 moneda.)
  *  - Cuando solo quedan 2 jugadores: DUELO FINAL, el primero en
  *    acertar 3 rondas se salva; el otro es el pringado.
  * ============================================================ */
