@@ -44,9 +44,10 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  var PROTO_V = 7; // versión del protocolo: si no coincide, hay que recargar la página
   function makeRoomCode() {
-    var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', c = '';
-    for (var i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
+    var c = '';
+    for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
     return c;
   }
   function isAI(id) { return id.indexOf('ai-') === 0; }
@@ -153,8 +154,8 @@
     var n = $('input-name').value.trim().slice(0, 12);
     if (!n) { $('home-error').textContent = 'Escribe tu nombre primero.'; return; }
     try { localStorage.setItem('chinchimoni-name', n); } catch (e) {}
-    var code = $('input-code').value.trim().toUpperCase();
-    if (!/^[A-Z0-9]{4}$/.test(code)) { $('home-error').textContent = 'El código tiene 4 letras/números.'; return; }
+    var code = $('input-code').value.trim();
+    if (!/^[0-9]{4}$/.test(code)) { $('home-error').textContent = 'El código tiene 4 números.'; return; }
     joinRoom(code, n);
   });
   // --- modo en solitario ---
@@ -288,7 +289,7 @@
 
     ch.subscribe(function (status) {
       if (status === 'SUBSCRIBED') {
-        ch.track({ name: S.name, joinedAt: S.joinedAt, photo: S.photo });
+        ch.track({ name: S.name, joinedAt: S.joinedAt, photo: S.photo, v: PROTO_V });
         showScreen('lobby');
         renderLobby();
       } else if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
@@ -319,7 +320,7 @@
     var players = [];
     Object.keys(state).forEach(function (key) {
       var pres = state[key];
-      if (pres && pres.length) players.push({ id: key, name: String(pres[0].name || '¿?').slice(0, 12), joinedAt: pres[0].joinedAt || 0, photo: pres[0].photo || null });
+      if (pres && pres.length) players.push({ id: key, name: String(pres[0].name || '¿?').slice(0, 12), joinedAt: pres[0].joinedAt || 0, photo: pres[0].photo || null, v: pres[0].v || 0 });
     });
     players.sort(function (a, b) { return a.joinedAt - b.joinedAt; });
     S.players = players;
@@ -384,7 +385,10 @@
     startBtn.classList.toggle('hidden', !S.isHost);
     startBtn.disabled = S.players.length < 2;
     var note = $('lobby-note');
-    if (S.players.length >= L.MAX_PLAYERS) {
+    var outdated = S.players.some(function (p) { return p.v !== PROTO_V; });
+    if (outdated) {
+      note.innerHTML = '⚠️ Alguien tiene una versión antigua del juego: que cierre y vuelva a abrir el enlace.';
+    } else if (S.players.length >= L.MAX_PLAYERS) {
       note.textContent = 'Sala llena: quien entre ahora mirará hasta la próxima ronda.';
     } else {
       note.innerHTML = 'Comparte el código con tus amigos. El primero en entrar es el anfitrión ' + icon('crown') + '.';
@@ -796,6 +800,7 @@
   // Marcador del duelo arriba: victorias de cada duelista, siempre visible.
   function renderDuelScore() {
     var d = $('duel-score');
+    if (!d) return;
     var g = S.game;
     if (!g || !g.finalDuel || g.state === 'gameOver' || g.roster.length !== 2) {
       d.classList.add('hidden');
@@ -944,6 +949,7 @@
   // para que lo vea toda la mesa. No bloquea: se esconde solo.
   function showTableOverlay(ids, tagText, tagClass) {
     var ov = $('saved-overlay');
+    if (!ov) return;
     ov.innerHTML = '';
     ids.forEach(function (id) {
       var item = el('div', null, 'saved-star' + (tagClass ? ' ' + tagClass : ''));
@@ -955,7 +961,7 @@
     ov.classList.remove('hidden');
     setTimeout(function () { ov.classList.add('hidden'); }, 2700);
   }
-  function hideTableOverlay() { $('saved-overlay').classList.add('hidden'); }
+  function hideTableOverlay() { var ov = $('saved-overlay'); if (ov) ov.classList.add('hidden'); }
 
   function renderMesa() {
     var g = S.game;

@@ -201,7 +201,7 @@ try {
   // A crea sala, B y C se unen
   A.$('btn-create').fire('click');
   const code = A.$('lobby-code').textContent;
-  ok(/^[A-Z0-9]{4}$/.test(code), 'sala creada con código ' + code);
+  ok(/^[0-9]{4}$/.test(code), 'sala creada con código ' + code);
   B.$('input-code').value = code; B.$('btn-join').fire('click');
   C.$('input-code').value = code; C.$('btn-join').fire('click');
   ok(B.$('lobby-players').children.length === 3, 'B ve 3 jugadores en el lobby');
