@@ -1,9 +1,9 @@
 /* ============================================================
- * Chinchimoni — interfaz + multijugador (Supabase Realtime).
- * Sin servidor propio: el anfitrión (host) reparte y arbitra;
+ * Chinchimoni — el juego de las monedas escondidas, online.
+ * Sin servidor propio: el anfitrión (host) arbitra la ronda;
  * los eventos viajan por broadcast en el canal `chinchimoni-XXXX`.
- * Las manos viajan etiquetadas con su destinatario: entre amigos
- * se juega con confianza (no mires la consola, tramposo).
+ * Cada jugador esconde 0..N monedas en el puño (viaja etiquetado
+ * con su destinatario: entre amigos se juega con confianza).
  * ============================================================ */
 (function () {
   'use strict';
@@ -17,13 +17,11 @@
   var S = {
     name: '', playerId: '', joinedAt: 0, roomCode: '',
     channel: null, sb: null,
-    isHost: false, players: [],   // [{id, name, joinedAt}] por presence
+    isHost: false, players: [],
     screen: 'home',
-    awaitingCard: false,
-    selectedId: null,
-    spectating: false,
+    selHide: null, selGuess: null,
     game: null,   // estado de la ronda
-    host: null    // {stock:[], pile:[], reveals:{}} solo en el anfitrión
+    host: null    // {hides:{}, guesses:{}, order:[], idx:0} solo anfitrión
   };
 
   // ---------- utilidades ----------
@@ -54,45 +52,25 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 2600);
   }
-  function showModal(html) {
+  function showModal(node) {
     $('modal-panel').innerHTML = '';
-    if (typeof html === 'string') $('modal-panel').innerHTML = html;
-    else $('modal-panel').appendChild(html);
+    $('modal-panel').appendChild(node);
     $('modal').classList.remove('hidden');
   }
   function hideModal() { $('modal').classList.add('hidden'); }
   function send(type, payload) {
     if (S.channel) S.channel.send({ type: 'broadcast', event: type, payload: payload });
   }
-  function rankLabel(r) { return r === 1 ? 'A' : String(r); }
-  function sortHand(hand) {
-    var order = { oros: 0, copas: 1, espadas: 2, bastos: 3 };
-    return hand.slice().sort(function (a, b) {
-      return (order[a.suit] - order[b.suit]) || (a.rank - b.rank);
-    });
-  }
-  function cardEl(c, mini) {
-    var d = el('div', null, 'carta palo-' + c.suit + (mini ? ' mini' : ''));
-    d.appendChild(el('div', rankLabel(c.rank), 'rango'));
-    d.appendChild(el('div', L.SUIT_GLYPH[c.suit], 'palo'));
-    d.appendChild(el('div', rankLabel(c.rank), 'rango inv'));
-    d.title = rankLabel(c.rank) + ' de ' + L.SUIT_NAME[c.suit];
-    return d;
-  }
   function presentIds() {
     var m = {};
     S.players.forEach(function (p) { m[p.id] = true; });
     return m;
   }
-  function activeIds() {
-    if (!S.game) return [];
-    var pr = presentIds();
-    return S.game.roster.filter(function (id) {
-      return !S.game.eliminated.has(id) && pr[id];
-    });
-  }
   function playerName(id) {
     return (S.game && S.game.names[id]) || '¿?';
+  }
+  function inRoster() {
+    return S.game && S.game.roster.indexOf(S.playerId) !== -1;
   }
 
   // ---------- portada ----------
@@ -141,18 +119,12 @@
 
     ch.on('presence', { event: 'sync' }, onPresenceSync);
     ch.on('broadcast', { event: 'start_round' }, onStartRound);
-    ch.on('broadcast', { event: 'deal' }, onDeal);
-    ch.on('broadcast', { event: 'discard_top' }, onDiscardTop);
-    ch.on('broadcast', { event: 'stock_count' }, onStockCount);
-    ch.on('broadcast', { event: 'reshuffle' }, function () { toast('🔀 Mazo rehecho con el descarte'); });
-    ch.on('broadcast', { event: 'turn' }, onTurn);
-    ch.on('broadcast', { event: 'draw_request' }, onDrawRequest);
-    ch.on('broadcast', { event: 'deal_one' }, onDealOne);
-    ch.on('broadcast', { event: 'draw_discard' }, onDrawDiscard);
-    ch.on('broadcast', { event: 'discard' }, onDiscard);
-    ch.on('broadcast', { event: 'close' }, onClose);
+    ch.on('broadcast', { event: 'hide' }, onHide);
+    ch.on('broadcast', { event: 'hide_progress' }, onHideProgress);
+    ch.on('broadcast', { event: 'guessing_start' }, onGuessingStart);
+    ch.on('broadcast', { event: 'guess_turn' }, onGuessTurn);
+    ch.on('broadcast', { event: 'guess' }, onGuess);
     ch.on('broadcast', { event: 'reveal' }, onReveal);
-    ch.on('broadcast', { event: 'round_end' }, onRoundEnd);
     ch.on('broadcast', { event: 'game_over' }, onGameOver);
     ch.on('broadcast', { event: 'round_abort' }, onRoundAbort);
 
@@ -170,7 +142,7 @@
   function leaveRoom() {
     if (S.channel) { try { S.channel.unsubscribe(); } catch (e) {} }
     S.channel = null; S.game = null; S.host = null; S.players = [];
-    S.isHost = false; S.awaitingCard = false; S.selectedId = null; S.spectating = false;
+    S.isHost = false; S.selHide = null; S.selGuess = null;
     hideModal();
     showScreen('home');
   }
@@ -199,13 +171,11 @@
 
     if (S.screen === 'lobby') renderLobby();
     if (S.screen === 'game' && S.game) {
-      // Migración de anfitrión: si el host se fue, el siguiente toma el mando.
       if (S.isHost && !wasHost) {
-        if (S.game.state === 'roundEnd' && S.game.lastRound) {
-          send('round_end', S.game.lastRound); // reenvía el marcador
-        } else if (S.game.state === 'gameOver' && S.game.lastGameOver) {
+        // Migración de anfitrión: el siguiente toma el mando.
+        if (S.game.state === 'gameOver' && S.game.lastGameOver) {
           send('game_over', S.game.lastGameOver);
-        } else if (S.game.state === 'playing' || S.game.state === 'awaitingReveal') {
+        } else {
           send('round_abort', { reason: 'El anfitrión se desconectó. Nueva ronda.' });
           hostStartRound(false);
           return;
@@ -216,15 +186,17 @@
     }
   }
 
-  // Si al que le toca jugar ya no está, se avanza el turno.
-  // Si alguien se fue durante el revelado, se comprueba si ya están todas.
   function hostWatchdog() {
     var g = S.game;
-    if (!g) return;
-    if (g.state === 'awaitingReveal') { checkReveals(); return; }
-    if (g.state !== 'playing') return;
-    var act = activeIds();
-    if (act.indexOf(g.turnId) === -1) hostAdvanceTurn();
+    if (!g || !S.host) return;
+    var pr = presentIds();
+    if (g.state === 'hiding') {
+      var need = g.roster.filter(function (id) { return pr[id]; });
+      if (need.length && need.every(function (id) { return S.host.hides[id] !== undefined; })) beginGuessing();
+      else send('hide_progress', { done: need.filter(function (id) { return S.host.hides[id] !== undefined; }).length, total: need.length });
+    } else if (g.state === 'guessing') {
+      if (!pr[g.turnId]) advanceGuess();
+    }
   }
 
   // ---------- lobby ----------
@@ -243,7 +215,7 @@
     startBtn.classList.toggle('hidden', !S.isHost);
     startBtn.disabled = S.players.length < 2;
     $('lobby-note').textContent = S.players.length >= L.MAX_PLAYERS
-      ? 'Sala llena: quien entre ahora jugará de espectador hasta la próxima ronda.'
+      ? 'Sala llena: quien entre ahora mirará hasta la próxima ronda.'
       : 'Comparte el código con tus amigos. El primero en entrar es el anfitrión 👑.';
   }
   $('btn-start').addEventListener('click', function () {
@@ -252,388 +224,225 @@
   });
 
   // ---------- ronda (anfitrión) ----------
-  function hostStartRound(resetScores) {
+  function hostStartRound(reset) {
     var present = S.players.slice(0, L.MAX_PLAYERS);
-    var prevScores = (S.game && S.game.scores) || {};
-    var prevEliminated = (S.game && S.game.eliminated) || new Set();
-    if (resetScores) { prevScores = {}; prevEliminated = new Set(); }
+    var prevCoins = (S.game && S.game.coins) || {};
+    var prevStarter = S.game && S.game.starterId;
 
-    var roster = present
-      .filter(function (p) { return !prevEliminated.has(p.id); })
-      .map(function (p) { return p.id; });
+    var roster = present.map(function (p) { return p.id; });
     if (roster.length < 2) { toast('Se necesitan al menos 2 jugadores.'); return; }
 
     var names = {};
     present.forEach(function (p) { names[p.id] = p.name; });
-    var scores = {};
-    roster.forEach(function (id) { scores[id] = prevScores[id] || 0; });
+    var coins = {};
+    roster.forEach(function (id) { coins[id] = reset ? L.START_COINS : (prevCoins[id] !== undefined ? prevCoins[id] : L.START_COINS); });
 
-    var dealerIdx = 0;
-    if (S.game && !resetScores && S.game.dealerId) {
-      // El dealer rota entre los presentes.
-      var ni = roster.indexOf(S.game.dealerId);
-      dealerIdx = ni === -1 ? 0 : (ni + 1) % roster.length;
+    var starterId = roster[0];
+    if (!reset && prevStarter) {
+      var ni = roster.indexOf(prevStarter);
+      starterId = ni === -1 ? roster[0] : roster[(ni + 1) % roster.length];
     }
 
-    var deck = L.shuffle(L.buildDeck());
-    var stock = deck, pile = [];
-    var hands = {};
-    roster.forEach(function (id) { hands[id] = stock.splice(0, L.HAND_SIZE); });
-    var top = stock.pop();
-    pile.push(top);
-
-    var round = (S.game && !resetScores) ? S.game.round + 1 : 1;
-    var counts = {};
-    roster.forEach(function (id) { counts[id] = L.HAND_SIZE; });
-    var firstTurn = L.nextTurn(roster, roster, roster[dealerIdx]);
-
-    S.host = { stock: stock, pile: pile, reveals: {} };
+    S.host = { hides: {}, guesses: {}, order: [], idx: 0 };
     S.game = {
-      roster: roster, names: names, scores: scores,
-      eliminated: new Set(), dealerIdx: dealerIdx, dealerId: roster[dealerIdx],
-      round: round, state: 'playing', turnId: firstTurn,
-      hand: [], phase: 'idle', stockCount: stock.length,
-      discardTop: top, counts: counts,
-      closerId: null, closerMelds: null, chinchon: false, revealed: {},
-      lastRound: null, lastGameOver: null
+      roster: roster, names: names, coins: coins,
+      round: (S.game && !reset) ? S.game.round + 1 : 1,
+      state: 'hiding', starterId: starterId, turnId: null,
+      maxTotal: L.maxTotal(coins),
+      myHide: null, hideDone: 0, hideTotal: roster.length,
+      guesses: {}, guessOrder: [],
+      lastReveal: null, lastGameOver: null, winnerId: null
     };
-    roster.forEach(function (id) { if (scores[id] >= L.BUST_SCORE) S.game.eliminated.add(id); });
-    S.spectating = roster.indexOf(S.playerId) === -1;
-    if (hands[S.playerId]) S.game.hand = sortHand(hands[S.playerId]);
-    S.awaitingCard = false;
-    S.selectedId = null;
+    S.selHide = null; S.selGuess = null;
     hideModal();
 
-    // self:false -> el anfitrión no recibe sus propios eventos: ya aplicó todo arriba.
     send('start_round', {
-      roster: roster, names: names, scores: scores, round: round,
-      dealerIdx: dealerIdx, dealerId: roster[dealerIdx],
-      eliminated: Array.from(S.game.eliminated)
+      roster: roster, names: names, coins: coins,
+      round: S.game.round, starterId: starterId, maxTotal: S.game.maxTotal
     });
-    roster.forEach(function (id) {
-      if (id !== S.playerId) send('deal', { to: id, cards: hands[id] });
-    });
-    send('discard_top', { card: top });
-    send('stock_count', { count: stock.length });
-    setTurn(firstTurn);
     showScreen('game');
     renderAll();
+    toast('🪙 Ronda ' + S.game.round + ': esconde tus monedas');
   }
 
-  function hostDrawStockFor(pid) {
-    var g = S.game;
-    if (!S.host.stock.length) {
-      var top = S.host.pile.pop();
-      S.host.stock = L.shuffle(S.host.pile);
-      S.host.pile = top ? [top] : [];
-      send('reshuffle', {});
-      toast('🔀 Mazo rehecho con el descarte');
-    }
-    if (!S.host.stock.length) {
-      send('round_abort', { reason: 'No quedan cartas en el mazo. Nueva ronda.' });
-      hostStartRound(false);
-      return null;
-    }
-    return S.host.stock.pop();
-  }
-
-  function hostAdvanceTurn() {
-    var g = S.game;
-    if (!g) return;
-    var next = L.nextTurn(g.roster, activeIds(), g.turnId);
-    if (!next) return;
-    setTurn(next);
-    send('turn', { playerId: next });
-  }
-
-  function setTurn(pid) {
-    S.game.turnId = pid;
-    S.awaitingCard = false;
-    S.game.phase = (pid === S.playerId && !S.spectating && !S.game.eliminated.has(S.playerId)) ? 'draw' : 'idle';
-  }
-
-  // ---------- eventos de ronda (todos) ----------
-  function onStartRound(p) {
-    var counts = {};
-    p.roster.forEach(function (id) { counts[id] = L.HAND_SIZE; });
-    S.game = {
-      roster: p.roster, names: p.names, scores: p.scores,
-      eliminated: new Set(p.eliminated || []), dealerIdx: p.dealerIdx, dealerId: p.dealerId,
-      round: p.round, state: 'playing', turnId: null,
-      hand: [], phase: 'idle', stockCount: 0,
-      discardTop: null, counts: counts,
-      closerId: null, closerMelds: null, chinchon: false, revealed: {},
-      lastRound: S.game ? S.game.lastRound : null,
-      lastGameOver: S.game ? S.game.lastGameOver : null
-    };
-    S.spectating = p.roster.indexOf(S.playerId) === -1;
-    S.awaitingCard = false;
-    S.selectedId = null;
-    hideModal();
-    showScreen('game');
-    renderAll();
-    toast('🃏 Ronda ' + p.round + ' — ¡suerte!');
-  }
-
-  function onDeal(p) {
-    if (p.to === S.playerId && S.game) {
-      S.game.hand = sortHand(p.cards);
-      renderHand(); renderActions(); renderBanner();
-    }
-  }
-
-  function onDiscardTop(p) {
-    if (!S.game) return;
-    S.game.discardTop = p.card;
-    renderTable();
-  }
-
-  function onStockCount(p) {
-    if (!S.game) return;
-    S.game.stockCount = p.count;
-    renderTable();
-  }
-
-  function onTurn(p) {
-    if (!S.game) return;
-    setTurn(p.playerId);
-    renderAll();
-    if (p.playerId === S.playerId && S.game.phase === 'draw') toast('🎯 Tu turno: roba del mazo o del descarte');
-  }
-
-  // Petición de carta del mazo (solo el anfitrión la atiende)
-  function onDrawRequest(p) {
-    if (!S.isHost || !S.game || S.game.state !== 'playing') return;
-    if (S.game.turnId !== p.playerId) return;
-    var card = hostDrawStockFor(p.playerId);
-    if (!card) return;
-    S.game.counts[p.playerId]++;
-    send('deal_one', { to: p.playerId, card: card });
-    send('stock_count', { count: S.host.stock.length });
-    renderAll();
-  }
-
-  function onDealOne(p) {
-    if (!S.game) return;
-    S.game.counts[p.to] = (S.game.counts[p.to] || 0) + 1;
-    if (p.to === S.playerId) {
-      S.game.hand = sortHand(S.game.hand.concat([p.card]));
-      S.game.phase = 'discard';
-      S.awaitingCard = false;
-    }
-    renderAll();
-  }
-
-  function onDrawDiscard(p) {
-    if (!S.game || p.playerId === S.playerId) return; // el que roba ya lo aplicó
-    S.game.discardTop = null;
-    S.game.counts[p.playerId]++;
-    if (S.isHost && S.host) S.host.pile.pop();
-    renderAll();
-  }
-
-  function onDiscard(p) {
-    if (!S.game || p.playerId === S.playerId) return; // el que descarta ya lo aplicó
-    S.game.discardTop = p.card;
-    S.game.counts[p.playerId]--;
-    if (S.isHost && S.host) {
-      S.host.pile.push(p.card);
-      hostAdvanceTurn();
-    }
-    renderAll();
-  }
-
-  function onClose(p) {
-    if (!S.game || p.playerId === S.playerId) return;
-    applyClose(p.playerId, p.discard, p.melds, p.chinchon);
-    var meActive = !S.spectating && !S.game.eliminated.has(S.playerId) && S.game.roster.indexOf(S.playerId) !== -1;
-    if (S.isHost && S.host) {
-      S.host.pile.push(p.discard);
-      if (meActive) S.host.reveals[S.playerId] = S.game.hand; // el anfitrión también enseña
-      checkReveals();
-    } else if (meActive) {
-      // Si soy jugador activo (no eliminado), enseño mis cartas.
-      send('reveal', { playerId: S.playerId, cards: S.game.hand });
-    }
-    renderAll();
-  }
-
-  function applyClose(pid, discardCard, melds, chinchon) {
-    var g = S.game;
-    g.state = 'awaitingReveal';
-    g.closerId = pid;
-    g.closerMelds = melds;
-    g.chinchon = chinchon;
-    g.discardTop = discardCard;
-    g.counts[pid]--;
-    if (pid === S.playerId) {
-      g.hand = g.hand.filter(function (c) { return c.id !== discardCard.id; });
-    }
-    g.phase = 'idle';
-    S.selectedId = null;
-  }
-
-  function onReveal(p) {
-    if (!S.isHost || !S.game || S.game.state !== 'awaitingReveal') return;
-    S.host.reveals[p.playerId] = p.cards;
-    checkReveals();
-  }
-
-  function revealNeeded() {
-    var g = S.game;
-    if (!g) return [];
+  function onHide(p) {
+    if (!S.isHost || !S.game || S.game.state !== 'hiding') return;
+    if (S.game.roster.indexOf(p.playerId) === -1) return;
+    var max = S.game.coins[p.playerId] || 0;
+    var n = Math.max(0, Math.min(max, p.count | 0));
+    S.host.hides[p.playerId] = n;
     var pr = presentIds();
-    return g.roster.filter(function (id) {
-      return id !== g.closerId && !g.eliminated.has(id) && pr[id];
-    });
+    var need = S.game.roster.filter(function (id) { return pr[id]; });
+    var done = need.filter(function (id) { return S.host.hides[id] !== undefined; }).length;
+    send('hide_progress', { done: done, total: need.length });
+    if (need.length && done === need.length) beginGuessing();
   }
 
-  function checkReveals() {
-    if (!S.isHost || !S.game || S.game.state !== 'awaitingReveal') return;
-    var needed = revealNeeded();
-    var ok = needed.every(function (id) { return S.host.reveals[id]; });
-    if (ok) finishRound();
+  function beginGuessing() {
+    var g = S.game;
+    var pr = presentIds();
+    var order = L.turnOrder(g.roster.filter(function (id) { return pr[id]; }), g.starterId);
+    if (!order.length) { send('round_abort', { reason: 'No queda nadie en la sala.' }); return; }
+    S.host.order = order;
+    S.host.idx = 0;
+    g.state = 'guessing';
+    g.turnId = order[0];
+    g.guessOrder = order;
+    send('guessing_start', { order: order });
+    send('guess_turn', { playerId: order[0] });
+    // self:false: el anfitrión aplica sus propios eventos
+    onGuessingStart({ order: order });
+    onGuessTurn({ playerId: order[0] });
+  }
+
+  function onGuess(p) {
+    if (!S.game) return;
+    if (S.game.state !== 'guessing') return;
+    if (S.game.guesses[p.playerId] !== undefined) return;
+    S.game.guesses[p.playerId] = p.number;
+    renderAll();
+    if (S.isHost) {
+      S.host.guesses[p.playerId] = p.number;
+      advanceGuess();
+    }
+  }
+
+  function advanceGuess() {
+    var g = S.game;
+    var pr = presentIds();
+    S.host.idx++;
+    while (S.host.idx < S.host.order.length && !pr[S.host.order[S.host.idx]]) S.host.idx++;
+    if (S.host.idx >= S.host.order.length) { finishRound(); return; }
+    var next = S.host.order[S.host.idx];
+    g.turnId = next;
+    send('guess_turn', { playerId: next });
+    onGuessTurn({ playerId: next });
   }
 
   function finishRound() {
     var g = S.game;
-    var hands = {};
-    hands[g.closerId] = g.closerMelds.reduce(function (a, m) { return a.concat(m); }, []);
-    Object.keys(S.host.reveals).forEach(function (pid) { hands[pid] = S.host.reveals[pid]; });
-    var roundScores = L.scoreRound(hands, g.closerId, g.chinchon);
-    var totals = Object.assign({}, g.scores);
-    Object.keys(roundScores).forEach(function (pid) { totals[pid] = (totals[pid] || 0) + roundScores[pid]; });
-    var eliminated = g.roster.filter(function (id) { return totals[id] >= L.BUST_SCORE; });
-    var stillIn = g.roster.filter(function (id) { return eliminated.indexOf(id) === -1; });
-
-    if (stillIn.length <= 1) {
-      var winnerId = stillIn[0] || g.roster.slice().sort(function (a, b) { return totals[a] - totals[b]; })[0];
+    var hides = {};
+    S.host.order.forEach(function (id) {
+      if (S.host.hides[id] !== undefined) hides[id] = S.host.hides[id];
+    });
+    var total = L.roundTotal(hides);
+    var correct = L.correctGuessers(S.host.guesses, total);
+    var res = L.applyRound(g.coins, correct);
+    if (res.winners.length) {
       var payload = {
-        winnerId: winnerId, totals: totals, roundScores: roundScores,
-        eliminated: eliminated, closerId: g.closerId, chinchon: g.chinchon,
-        reveals: S.host.reveals, closerMelds: g.closerMelds, round: g.round
+        winnerId: res.winners[0], hides: hides, total: total,
+        guesses: S.host.guesses, correct: correct,
+        coins: res.coins, round: g.round
       };
       send('game_over', payload);
-      onGameOver(payload); // el anfitrión no se recibe a sí mismo
+      onGameOver(payload);
     } else {
       var payload2 = {
-        totals: totals, roundScores: roundScores,
-        eliminated: eliminated, closerId: g.closerId, chinchon: g.chinchon,
-        reveals: S.host.reveals, closerMelds: g.closerMelds, round: g.round
+        hides: hides, total: total,
+        guesses: S.host.guesses, correct: correct,
+        coins: res.coins, round: g.round
       };
-      send('round_end', payload2);
-      onRoundEnd(payload2);
+      send('reveal', payload2);
+      onReveal(payload2);
     }
   }
 
-  function onRoundEnd(p) {
-    if (!S.game) return;
-    S.game.state = 'roundEnd';
-    S.game.scores = p.totals;
-    S.game.eliminated = new Set(p.eliminated);
-    S.game.lastRound = p;
+  // ---------- eventos (todos) ----------
+  function onStartRound(p) {
+    S.game = {
+      roster: p.roster, names: p.names, coins: p.coins,
+      round: p.round, state: 'hiding', starterId: p.starterId, turnId: null,
+      maxTotal: p.maxTotal,
+      myHide: null, hideDone: 0, hideTotal: p.roster.length,
+      guesses: {}, guessOrder: [],
+      lastReveal: S.game ? S.game.lastReveal : null,
+      lastGameOver: S.game ? S.game.lastGameOver : null,
+      winnerId: null
+    };
+    S.selHide = null; S.selGuess = null;
+    hideModal();
+    showScreen('game');
     renderAll();
-    showRoundEndModal(p, false);
+    toast('🪙 Ronda ' + p.round + ': esconde tus monedas');
+  }
+
+  function onHideProgress(p) {
+    if (!S.game) return;
+    S.game.hideDone = p.done;
+    S.game.hideTotal = p.total;
+    renderBanner(); renderStage();
+  }
+
+  function onGuessingStart(p) {
+    if (!S.game) return;
+    S.game.state = 'guessing';
+    S.game.guessOrder = p.order;
+    renderAll();
+  }
+
+  function onGuessTurn(p) {
+    if (!S.game) return;
+    S.game.state = 'guessing';
+    S.game.turnId = p.playerId;
+    S.selGuess = null;
+    renderAll();
+    if (p.playerId === S.playerId && inRoster()) toast('🎯 Te toca: ¿cuántas monedas hay en total?');
+  }
+
+  function onReveal(p) {
+    if (!S.game) return;
+    S.game.state = 'reveal';
+    S.game.coins = p.coins;
+    S.game.lastReveal = p;
+    renderAll();
   }
 
   function onGameOver(p) {
     if (!S.game) return;
     S.game.state = 'gameOver';
-    S.game.scores = p.totals;
-    S.game.eliminated = new Set(p.eliminated);
+    S.game.coins = p.coins;
+    S.game.winnerId = p.winnerId;
+    S.game.lastReveal = p;
     S.game.lastGameOver = p;
     renderAll();
-    showRoundEndModal(p, true);
+    showGameOverModal(p);
   }
 
   function onRoundAbort(p) {
     if (!S.game) return;
-    S.game.state = 'aborted';
     hideModal();
     renderAll();
     toast(p.reason || 'Ronda anulada.', 4000);
   }
 
   // ---------- acciones del jugador ----------
-  function myTurnPhase() {
-    var g = S.game;
-    if (!g || g.state !== 'playing' || S.spectating) return null;
-    if (g.eliminated.has(S.playerId)) return null;
-    if (g.turnId !== S.playerId) return null;
-    return g.phase;
-  }
-
-  function doDrawStock() {
-    if (myTurnPhase() !== 'draw' || S.awaitingCard) return;
-    if (S.isHost) {
-      var card = hostDrawStockFor(S.playerId);
-      if (!card) return;
-      S.game.hand = sortHand(S.game.hand.concat([card]));
-      S.game.counts[S.playerId]++;
-      S.game.phase = 'discard';
-      send('stock_count', { count: S.host.stock.length });
-      renderAll();
-    } else {
-      S.awaitingCard = true;
-      send('draw_request', { playerId: S.playerId });
-      renderActions(); renderBanner();
-    }
-  }
-
-  function doDrawDiscard() {
-    if (myTurnPhase() !== 'draw' || S.awaitingCard) return;
-    var g = S.game;
-    if (!g.discardTop) return;
-    var card = g.discardTop;
-    g.hand = sortHand(g.hand.concat([card]));
-    g.discardTop = null;
-    g.counts[S.playerId]++;
-    g.phase = 'discard';
-    send('draw_discard', { playerId: S.playerId });
-    if (S.isHost && S.host) S.host.pile.pop();
+  function doHide() {
+    if (!S.game || S.game.state !== 'hiding' || !inRoster()) return;
+    if (S.selHide === null || S.game.myHide !== null) return;
+    S.game.myHide = S.selHide;
+    send('hide', { playerId: S.playerId, count: S.selHide });
+    if (S.isHost) onHide({ playerId: S.playerId, count: S.selHide }); // self:false: aplicar local
     renderAll();
   }
 
-  function doDiscard() {
-    if (myTurnPhase() !== 'discard') return;
-    var g = S.game;
-    var card = null;
-    for (var i = 0; i < g.hand.length; i++) {
-      if (g.hand[i].id === S.selectedId) { card = g.hand[i]; break; }
-    }
-    if (!card) { toast('Elige una carta de tu mano.'); return; }
-    g.hand = g.hand.filter(function (c) { return c.id !== card.id; });
-    g.discardTop = card;
-    g.counts[S.playerId]--;
-    g.phase = 'idle';
-    S.selectedId = null;
-    send('discard', { playerId: S.playerId, card: card });
-    if (S.isHost && S.host) {
-      S.host.pile.push(card);
-      hostAdvanceTurn();
-    }
+  function doGuess() {
+    if (!S.game || S.game.state !== 'guessing' || !inRoster()) return;
+    if (S.game.turnId !== S.playerId || S.selGuess === null) return;
+    if (S.game.guesses[S.playerId] !== undefined) return;
+    var used = {};
+    Object.keys(S.game.guesses).forEach(function (id) { used[S.game.guesses[id]] = true; });
+    if (used[S.selGuess]) { toast('Ese número ya lo dijo otro.'); return; }
+    var n = S.selGuess;
+    S.game.guesses[S.playerId] = n;
+    send('guess', { playerId: S.playerId, number: n });
+    if (S.isHost) onGuess({ playerId: S.playerId, number: n });
+    S.selGuess = null;
     renderAll();
-  }
-
-  function doClose() {
-    if (myTurnPhase() !== 'discard') return;
-    var res = L.canClose(S.game.hand);
-    if (!res) { toast('Con estas cartas no puedes cerrar.'); return; }
-    var g = S.game;
-    applyClose(S.playerId, res.discard, res.melds, res.chinchon);
-    send('close', { playerId: S.playerId, discard: res.discard, melds: res.melds, chinchon: res.chinchon });
-    if (S.isHost && S.host) {
-      S.host.pile.push(res.discard);
-      S.host.reveals = {};
-    }
-    renderAll();
-    toast(res.chinchon ? '🎉 ¡CHINCHÓN! −25 puntos' : '✋ ¡Has cerrado!');
   }
 
   // ---------- render ----------
   function renderAll() {
-    renderBanner(); renderOpponents(); renderTable();
-    renderHand(); renderActions(); renderScores();
+    renderBanner(); renderPlayers(); renderStage(); renderActions(); renderScores();
     $('game-round').textContent = 'Ronda ' + (S.game ? S.game.round : 1);
     $('game-code').textContent = 'sala ' + S.roomCode;
   }
@@ -643,97 +452,134 @@
     var g = S.game;
     b.classList.remove('my-turn');
     if (!g) { b.textContent = '…'; return; }
-    if (g.state === 'awaitingReveal') {
-      b.textContent = '✋ ' + playerName(g.closerId) + ' ha cerrado' +
-        (g.chinchon ? ' con CHINCHÓN 🎉' : '') + '. Enseñando cartas…';
-      return;
-    }
-    if (g.state === 'roundEnd' || g.state === 'gameOver') { b.textContent = 'Ronda terminada.'; return; }
-    if (g.state === 'aborted') { b.textContent = 'Reiniciando ronda…'; return; }
-    if (S.spectating) { b.textContent = 'Estás de espectador: entrarás en la próxima ronda.'; return; }
-    if (g.eliminated.has(S.playerId)) { b.textContent = '💀 Eliminado. Puedes mirar la partida.'; return; }
-    var ph = myTurnPhase();
-    if (ph === 'draw') {
-      b.textContent = '🎯 Tu turno: toca el mazo o el descarte para robar.';
-      b.classList.add('my-turn');
-    } else if (ph === 'discard') {
-      var can = L.canClose(g.hand);
-      b.textContent = can ? '🎉 ¡Puedes CERRAR! O descarta una carta.' : 'Elige una carta de tu mano y descártala.';
-      b.classList.add('my-turn');
-    } else if (g.turnId) {
-      b.textContent = 'Turno de ' + playerName(g.turnId) + '…';
-    } else {
-      b.textContent = 'Repartiendo…';
+    if (!inRoster()) { b.textContent = 'Estás de espectador: entrarás en la próxima ronda.'; return; }
+    if (g.state === 'hiding') {
+      if (g.myHide === null) {
+        b.textContent = '✊ Esconde tus monedas en el puño (0–' + (g.coins[S.playerId] || 0) + ')';
+        b.classList.add('my-turn');
+      } else {
+        b.textContent = 'Puño cerrado… esperando al resto (' + g.hideDone + '/' + g.hideTotal + ')';
+      }
+    } else if (g.state === 'guessing') {
+      if (g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
+        b.textContent = '🎯 Te toca: ¿cuántas monedas suman entre todos?';
+        b.classList.add('my-turn');
+      } else if (g.guesses[S.playerId] !== undefined) {
+        b.textContent = 'Dijiste ' + g.guesses[S.playerId] + '. Esperando al resto…';
+      } else {
+        b.textContent = playerName(g.turnId) + ' está pensando su número…';
+      }
+    } else if (g.state === 'reveal' && g.lastReveal) {
+      var r = g.lastReveal;
+      b.textContent = r.correct.length
+        ? '🎉 ¡Manos arriba! Total: ' + r.total + ' — aciertan ' + r.correct.map(playerName).join(', ')
+        : '🖐️ ¡Manos arriba! Total: ' + r.total + ' — nadie acertó';
+    } else if (g.state === 'gameOver') {
+      b.textContent = '🏆 ¡' + playerName(g.winnerId) + ' se queda sin monedas y gana!';
     }
   }
 
-  function renderOpponents() {
+  function coinsStr(n) {
+    var s = '';
+    for (var i = 0; i < n; i++) s += '🪙';
+    return s || '—';
+  }
+
+  function renderPlayers() {
     var box = $('opponents');
     box.innerHTML = '';
     var g = S.game;
     if (!g) return;
     g.roster.forEach(function (id) {
-      if (id === S.playerId) return;
-      var chip = el('div', null, 'chip' + (g.turnId === id && g.state === 'playing' ? ' activo' : '') + (g.eliminated.has(id) ? ' eliminado' : ''));
-      chip.appendChild(el('span', (g.eliminated.has(id) ? '💀 ' : '') + playerName(id)));
-      chip.appendChild(el('span', '🂠 ' + (g.counts[id] || 0), 'ncartas'));
-      var pts = el('span', (g.scores[id] || 0) + ' pts', 'ncartas');
-      chip.appendChild(pts);
+      var active = g.state === 'guessing' && g.turnId === id && g.guesses[id] === undefined;
+      var chip = el('div', null, 'chip' + (active ? ' activo' : ''));
+      chip.appendChild(el('span', playerName(id) + (id === S.playerId ? ' (tú)' : '')));
+      chip.appendChild(el('span', coinsStr(g.coins[id] || 0), 'ncartas'));
       box.appendChild(chip);
     });
   }
 
-  function renderTable() {
+  function renderStage() {
+    var st = $('stage');
+    st.innerHTML = '';
     var g = S.game;
-    var stock = $('pile-stock'), disc = $('pile-discard');
-    stock.onclick = null; disc.onclick = null;
-    stock.classList.remove('activa'); disc.classList.remove('activa');
-    // limpia la carta visible del descarte
-    var old = disc.querySelector('.carta');
-    if (old) old.remove();
-    if (!g) { $('stock-count').textContent = '0'; return; }
-    $('stock-count').textContent = g.stockCount;
-    if (g.discardTop) disc.insertBefore(cardEl(g.discardTop), disc.firstChild);
-    if (myTurnPhase() === 'draw' && !S.awaitingCard) {
-      stock.classList.add('activa'); stock.onclick = doDrawStock;
-      if (g.discardTop) { disc.classList.add('activa'); disc.onclick = doDrawDiscard; }
-    }
-  }
+    if (!g || !inRoster()) return;
 
-  function renderHand() {
-    var box = $('hand');
-    box.innerHTML = '';
-    var g = S.game;
-    if (!g || S.spectating) return;
-    var jugable = myTurnPhase() === 'discard';
-    g.hand.forEach(function (c) {
-      var d = cardEl(c);
-      if (jugable) {
-        d.classList.add('jugable');
-        if (c.id === S.selectedId) d.classList.add('selected');
-        (function (id) {
-          d.onclick = function () {
-            S.selectedId = (S.selectedId === id) ? null : id;
-            renderHand(); renderActions();
-          };
-        })(c.id);
+    if (g.state === 'hiding' && g.myHide === null) {
+      var max = g.coins[S.playerId] || 0;
+      st.appendChild(el('p', '¿Cuántas escondes?', 'stage-title'));
+      var row = el('div', null, 'numpad');
+      for (var i = 0; i <= max; i++) {
+        (function (n) {
+          var b = el('button', String(n), 'num' + (S.selHide === n ? ' sel' : ''));
+          b.onclick = function () { S.selHide = n; renderStage(); renderActions(); };
+          row.appendChild(b);
+        })(i);
       }
-      box.appendChild(d);
-    });
+      st.appendChild(row);
+    } else if (g.state === 'guessing') {
+      // lista de apuestas en orden
+      if (g.guessOrder.length) {
+        var gl = el('div', null, 'guesses');
+        g.guessOrder.forEach(function (id) {
+          var v = g.guesses[id];
+          var chip = el('div', null, 'guess-chip' + (v === undefined ? ' pending' : ''));
+          chip.appendChild(el('span', playerName(id)));
+          chip.appendChild(el('strong', v === undefined ? '…' : String(v)));
+          gl.appendChild(chip);
+        });
+        st.appendChild(gl);
+      }
+      if (g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
+        st.appendChild(el('p', 'Di un número del 0 al ' + g.maxTotal + ' (sin repetir):', 'stage-title'));
+        var used = {};
+        Object.keys(g.guesses).forEach(function (id) { used[g.guesses[id]] = true; });
+        var pad = el('div', null, 'numpad');
+        for (var n2 = 0; n2 <= g.maxTotal; n2++) {
+          (function (n) {
+            var b = el('button', String(n), 'num' + (S.selGuess === n ? ' sel' : ''));
+            b.disabled = !!used[n];
+            b.onclick = function () { S.selGuess = n; renderStage(); renderActions(); };
+            pad.appendChild(b);
+          })(n2);
+        }
+        st.appendChild(pad);
+      }
+    } else if (g.state === 'reveal' && g.lastReveal) {
+      var r = g.lastReveal;
+      st.appendChild(el('p', '🖐️ Total: ' + r.total + ' monedas', 'stage-title big'));
+      var list = el('div', null, 'reveal-list');
+      g.roster.forEach(function (id) {
+        var ok = r.correct.indexOf(id) !== -1;
+        var row2 = el('div', null, 'reveal-row' + (ok ? ' hit' : ''));
+        row2.appendChild(el('span', (ok ? '✅ ' : '') + playerName(id) + (id === S.playerId ? ' (tú)' : '')));
+        row2.appendChild(el('span', '✊ ' + coinsStr(r.hides[id] || 0), 'fist'));
+        row2.appendChild(el('span', 'dijo ' + (r.guesses[id] !== undefined ? r.guesses[id] : '—'), 'muted'));
+        list.appendChild(row2);
+      });
+      st.appendChild(list);
+    }
   }
 
   function renderActions() {
     var box = $('actions');
     box.innerHTML = '';
-    if (myTurnPhase() !== 'discard') return;
-    var btnD = el('button', 'Descartar', 'btn');
-    btnD.disabled = !S.selectedId;
-    btnD.onclick = doDiscard;
-    box.appendChild(btnD);
-    if (S.game && L.canClose(S.game.hand)) {
-      var btnC = el('button', S.game && L.canClose(S.game.hand).chinchon ? '🎉 ¡CHINCHÓN!' : '✋ Cerrar', 'btn btn-cerrar');
-      btnC.onclick = doClose;
-      box.appendChild(btnC);
+    var g = S.game;
+    if (!g || !inRoster()) return;
+    if (g.state === 'hiding' && g.myHide === null) {
+      var b = el('button', 'Esconder ✊', 'btn btn-big');
+      b.disabled = S.selHide === null;
+      b.onclick = doHide;
+      box.appendChild(b);
+    } else if (g.state === 'guessing' && g.turnId === S.playerId && g.guesses[S.playerId] === undefined) {
+      var b2 = el('button', 'Adivinar 🎯', 'btn btn-big');
+      b2.disabled = S.selGuess === null;
+      b2.onclick = doGuess;
+      box.appendChild(b2);
+    } else if (g.state === 'reveal' && S.isHost) {
+      var b3 = el('button', '▶ Siguiente ronda', 'btn btn-big');
+      b3.onclick = function () { hostStartRound(false); };
+      box.appendChild(b3);
     }
   }
 
@@ -742,82 +588,36 @@
     ul.innerHTML = '';
     var g = S.game;
     if (!g) return;
-    var ids = g.roster.slice().sort(function (a, b) { return (g.scores[a] || 0) - (g.scores[b] || 0); });
+    var ids = g.roster.slice().sort(function (a, b) { return (g.coins[a] || 0) - (g.coins[b] || 0); });
     ids.forEach(function (id) {
       var li = el('li');
-      var name = playerName(id) + (id === S.playerId ? ' (tú)' : '') + (g.eliminated.has(id) ? ' 💀' : '');
-      li.appendChild(el('span', name));
-      li.appendChild(el('span', (g.scores[id] || 0) + ' pts'));
+      li.appendChild(el('span', playerName(id) + (id === S.playerId ? ' (tú)' : '')));
+      li.appendChild(el('span', coinsStr(g.coins[id] || 0)));
       ul.appendChild(li);
     });
   }
 
-  // ---------- modal de fin de ronda / partida ----------
-  function showRoundEndModal(p, isGameOver) {
-    var g = S.game;
+  function showGameOverModal(p) {
     var wrap = el('div');
-    if (isGameOver) {
-      wrap.appendChild(el('div', '🏆', 'winner'));
-      var h = el('h2', '¡' + playerName(p.winnerId) + ' gana la partida!');
-      h.style.textAlign = 'center';
-      wrap.appendChild(h);
-    } else {
-      var t = el('h2', (p.chinchon ? '🎉 ¡CHINCHÓN de ' : '✋ Cierra ') + playerName(p.closerId) + (p.chinchon ? '!' : ''));
-      wrap.appendChild(t);
-      var sub = el('p', 'Ronda ' + p.round + ' · puntos de la ronda:', 'muted');
-      sub.style.color = '#555';
-      wrap.appendChild(sub);
-    }
-
-    // jugadas del que cierra
-    var cm = el('div');
-    cm.appendChild(el('strong', 'Jugada de ' + playerName(p.closerId) + ':'));
-    (p.closerMelds || []).forEach(function (meld) {
-      var row = el('div', null, 'mano-revelada');
-      meld.forEach(function (c) { row.appendChild(cardEl(c, true)); });
-      cm.appendChild(row);
-    });
-    wrap.appendChild(cm);
-
-    // tabla de puntos
-    var table = el('table', null, 'tabla-puntos');
-    var thead = el('tr');
-    ['Jugador', 'Ronda', 'Total'].forEach(function (t2) { thead.appendChild(el('th', t2)); });
-    table.appendChild(thead);
-    var ids = g.roster.slice().sort(function (a, b) { return (p.totals[a] || 0) - (p.totals[b] || 0); });
-    ids.forEach(function (id) {
-      var tr = el('tr');
-      var nm = playerName(id) + (id === S.playerId ? ' (tú)' : '');
-      var tdN = el('td', nm);
-      if (p.eliminated.indexOf(id) !== -1) {
-        tdN.appendChild(el('span', ' 💀 eliminado', 'eliminado-tag'));
-      }
-      tr.appendChild(tdN);
-      tr.appendChild(el('td', String(p.roundScores[id] !== undefined ? p.roundScores[id] : '—'), 'num'));
-      tr.appendChild(el('td', String(p.totals[id] || 0), 'num'));
-      table.appendChild(tr);
-    });
-    wrap.appendChild(table);
-
+    wrap.appendChild(el('div', '🏆', 'winner'));
+    var h = el('h2', '¡' + playerName(p.winnerId) + ' gana la partida!');
+    h.style.textAlign = 'center';
+    wrap.appendChild(h);
+    var sub = el('p', 'Se quedó sin monedas en la ronda ' + p.round + '.', 'muted');
+    sub.style.textAlign = 'center'; sub.style.color = '#555';
+    wrap.appendChild(sub);
     var row = el('div', null, 'row');
-    if (S.isHost && !isGameOver) {
-      var btnN = el('button', '▶ Siguiente ronda', 'btn btn-big');
-      btnN.onclick = function () { hostStartRound(false); };
-      row.appendChild(btnN);
-    }
-    if (S.isHost && isGameOver) {
+    if (S.isHost) {
       var btnR = el('button', '🔄 Jugar otra vez', 'btn btn-big');
       btnR.onclick = function () { hostStartRound(true); };
       row.appendChild(btnR);
-    }
-    if (!S.isHost) {
+    } else {
       row.appendChild(el('p', 'Esperando al anfitrión…', 'muted'));
     }
     var btnX = el('button', 'Ver la mesa', 'btn-secondary');
     btnX.onclick = hideModal;
     row.appendChild(btnX);
     wrap.appendChild(row);
-
     showModal(wrap);
   }
 

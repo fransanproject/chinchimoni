@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chinchimoni 🃏 — chinchón online con amigos</title>
+<title>Chinchimoni 🪙 — el juego de las monedas escondidas</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="logic.js"></script>
@@ -13,9 +13,9 @@
 <!-- ============ PORTADA ============ -->
 <section id="screen-home" class="screen">
   <div class="hero">
-    <div class="logo">🃏</div>
+    <div class="logo">🪙</div>
     <h1>Chinchimoni</h1>
-    <p class="tagline">El chinchón de toda la vida, online con tus amigos.<br>Salas con código · hasta 12 jugadores.</p>
+    <p class="tagline">El juego de las monedas escondidas, online con tus amigos.<br>Salas con código · hasta 12 jugadores.</p>
   </div>
   <div class="card-panel">
     <label for="input-name">Tu nombre</label>
@@ -33,13 +33,12 @@
   <details class="rules">
     <summary>¿Cómo se juega?</summary>
     <ul>
-      <li>Se reparten <b>7 cartas</b> a cada jugador con baraja española doble.</li>
-      <li>En tu turno <b>robas una carta</b> (del mazo o del descarte) y <b>descartas otra</b>.</li>
-      <li>Liga tus cartas en <b>tríos</b> (mismo número) o <b>escaleras</b> (mismo palo, correlativas; el as solo vale como 1).</li>
-      <li>Si tras robar puedes ligar las 7, <b>¡cierra!</b> <b>Chinchón</b> = escalera de 7 del mismo palo → <b>−25 puntos</b>.</li>
-      <li>Al cerrar, los demás cuentan los puntos de sus cartas sin ligar (las figuras valen 10).</li>
-      <li>Los puntos se acumulan: con <b>100 o más quedas eliminado</b>. Gana el último en pie.</li>
-      <li>🤫 Las cartas viajan por la sala: no cotillees la consola del navegador, tramposo.</li>
+      <li>Cada jugador empieza con <b>3 monedas</b> 🪙🪙🪙.</li>
+      <li>Cada ronda, todos esconden <b>a la vez</b> 0, 1, 2 o 3 monedas en el puño ✊.</li>
+      <li>Por turnos, cada jugador <b>dice un número</b>: su apuesta de cuántas monedas suman <b>entre todos</b>. No se puede repetir un número ya dicho.</li>
+      <li>¡Manos arriba! 🖐️ Quien haya <b>acertado la suma exacta</b> descarta una moneda.</li>
+      <li>Gana el <b>primero en quedarse sin monedas</b> 🏆.</li>
+      <li>🤫 Lo que escondes viaja por la sala: no cotillees la consola del navegador, tramposo.</li>
     </ul>
   </details>
 </section>
@@ -53,7 +52,7 @@
   <ul id="lobby-players"></ul>
   <p id="lobby-count" class="muted"></p>
   <div class="row">
-    <button id="btn-start" class="btn btn-big hidden">🃏 Empezar partida</button>
+    <button id="btn-start" class="btn btn-big hidden">🪙 Empezar partida</button>
     <button id="btn-leave-lobby" class="btn-secondary">Salir</button>
   </div>
 </section>
@@ -66,18 +65,10 @@
   </header>
   <div id="turn-banner" class="banner">…</div>
   <div id="opponents" class="opponents"></div>
-  <div id="table" class="table">
-    <div class="pila-wrap">
-      <div id="pile-stock" class="pila"><div class="dorso"></div><span id="stock-count" class="count">0</span><small>mazo</small></div>
-    </div>
-    <div class="pila-wrap">
-      <div id="pile-discard" class="pila"><small>descarte</small></div>
-    </div>
-  </div>
+  <div id="stage" class="stage"></div>
   <div id="actions" class="actions"></div>
-  <div id="hand" class="hand"></div>
   <details id="scoreboard" class="scoreboard">
-    <summary>🏆 Puntuación</summary>
+    <summary>🪙 Monedas</summary>
     <ul id="scores-list"></ul>
   </details>
 </section>
