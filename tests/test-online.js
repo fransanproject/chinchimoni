@@ -90,10 +90,11 @@ function makeFakeSupabase() {
 
 function newClient(name) {
   const byId = {};
+  const timers = [];
   const sandbox = {
     console,
-    setTimeout: (fn) => { fn(); return 0; },
-    clearTimeout: () => {},
+    setTimeout: (fn, ms) => { const id = timers.length + 1; timers.push({ id, fn, ms: ms || 0, dead: false }); return id; },
+    clearTimeout: (id) => { const t = timers.find(x => x.id === id); if (t) t.dead = true; },
     Math, JSON, Object, Array, String, Number,
     navigator: {},
     localStorage: { _d: {}, getItem(k) { return this._d[k] || null; }, setItem(k, v) { this._d[k] = v; } },
@@ -115,7 +116,13 @@ function newClient(name) {
   const doc = sandbox.document;
   const $ = (id) => doc.getElementById(id);
   $('input-name').value = name;
-  return { doc, $, name };
+  // Ejecuta los temporizadores pendientes (los nuevos que se programen esperan al siguiente pump).
+  const pumpOnce = () => {
+    const batch = timers.filter(t => !t.dead);
+    batch.forEach(t => { t.dead = true; });
+    batch.forEach(t => t.fn());
+  };
+  return { doc, $, name, pumpOnce };
 }
 
 function deepText(n) {
@@ -189,6 +196,7 @@ try {
   const A = newClient('Ana');
   const B = newClient('Beto');
   const C = newClient('Carlos');
+  const pumpAll = () => { A.pumpOnce(); B.pumpOnce(); C.pumpOnce(); };
 
   // A crea sala, B y C se unen
   A.$('btn-create').fire('click');
@@ -203,9 +211,25 @@ try {
   hideFor(A, 1); hideFor(B, 1); hideFor(C, 1);
   guessFor(A, 3); // ¡acierta! se salva
   guessFor(B, 0);
-  guessFor(C, 1);
+  guessFor(C, 1); // última apuesta: el resultado espera 1,5s
+  let bub0 = bubblesOf(A);
+  ok(String(bub0['Ana']) === '3' && String(bub0['Beto']) === '0' && String(bub0['Carlos']) === '1',
+    'se ven los 3 bocadillos, incluido el último: ' + JSON.stringify(bub0));
+  ok(centroTotalOf(A) === null, 'el resultado aún no se anuncia (espera 1,5s)');
+  pumpAll(); // se cumple la espera → se resuelve la ronda
   ok(String(centroTotalOf(A)) === '3', 'A ve el total 3 en el centro al resolver');
   ok(String(centroTotalOf(B)) === '3', 'B ve el total 3 en el centro al resolver');
+
+  // Anuncio grande del salvado: 2s después del resultado, se esconde solo.
+  ok(A.$('saved-overlay').classList.contains('hidden'), 'el anuncio está oculto justo al resolver');
+  pumpAll();
+  var ovTxt = deepText(A.$('saved-overlay'));
+  ok(!A.$('saved-overlay').classList.contains('hidden') && /Ana/.test(ovTxt) && /¡Salvado!/.test(ovTxt),
+    'toda la mesa ve en grande que Ana se salva');
+  var ovTxtB = deepText(B.$('saved-overlay'));
+  ok(/Ana/.test(ovTxtB), 'B también ve el anuncio de Ana salvada');
+  pumpAll();
+  ok(A.$('saved-overlay').classList.contains('hidden'), 'el anuncio se esconde solo');
 
   // Duelo final: juegan Beto y Carlos; Ana mira salvada.
   const next = findBtn(A, 'Siguiente ronda') || findBtn(A, 'Empezar el duelo');
@@ -220,10 +244,16 @@ try {
   ok(String(bub['Beto']) === '5', 'A (salvada) ve el bocadillo de Beto con el 5: ' + JSON.stringify(bub));
   ok(/Turno de Carlos/.test(deepText(A.$('mesa-centro'))),
     'A (salvada) ve el turno de Carlos en el centro');
-  guessFor(C, 3); // acierta (1 de 3) → el duelo continúa
+  guessFor(C, 3); // última apuesta del duelo: también espera 1,5s
+  let bub2 = bubblesOf(A);
+  ok(String(bub2['Carlos']) === '3', 'el último bocadillo del duelo también se ve: ' + JSON.stringify(bub2));
+  pumpAll();
   ok(String(centroTotalOf(A)) === '3', 'A (salvada) ve el total 3 del duelo en el centro');
   ok(String(centroTotalOf(C)) === '3', 'C ve el total 3 en el centro');
   ok(/Carlos 1/.test(deepText(A.$('mesa-centro'))), 'A ve los aciertos del duelo en el centro');
+  // En el duelo no hay anuncio de salvado (nadie se salva aún)
+  pumpAll();
+  ok(A.$('saved-overlay').classList.contains('hidden'), 'sin anuncio de salvado en el duelo');
 } catch (e) {
   fails++;
   console.error('FALLA: excepción:', e.stack.split('\n').slice(0, 5).join('\n'));

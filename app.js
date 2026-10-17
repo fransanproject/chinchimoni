@@ -61,7 +61,6 @@
   var ICON_PATHS = {
     fist: '<path d="M7.2 12.2V8.5a1.5 1.5 0 0 1 3 0v3.7"/><path d="M10.2 12.2V6.8a1.5 1.5 0 0 1 3 0v5.4"/><path d="M13.2 12.2V8.5a1.5 1.5 0 0 1 3 0v5.2"/><path d="M7.2 12.2c-1.2 0-2.1-1-2.1-2.1v-1a1.6 1.6 0 0 1 3.1-.5"/><path d="M7.2 12.2v4.3a4 4 0 0 0 4 4h2.3a4 4 0 0 0 4-4v-2.3a2 2 0 0 0-2-2H9.2a2 2 0 0 0-2 2z"/>',
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
-    coins: '<ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/><path d="M5 11.5v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
     trophy: '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5.5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5C3 10 5 12 7.5 12"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5C21 10 19 12 16.5 12"/>',
     bot: '<rect x="4.5" y="9" width="15" height="10" rx="2.5"/><path d="M12 9V4.5"/><circle cx="12" cy="3.5" r="1" fill="currentColor" stroke="none"/><circle cx="9.3" cy="14" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.7" cy="14" r="1.1" fill="currentColor" stroke="none"/><path d="M9.5 17h5"/>',
@@ -297,6 +296,7 @@
     S.channel = null; S.game = null; S.host = null; S.players = [];
     S.isHost = false; S.local = false; S.selHide = null; S.selGuess = null;
     hideModal();
+    hideTableOverlay();
     showScreen('home');
   }
   $('btn-leave-lobby').addEventListener('click', leaveRoom);
@@ -430,6 +430,7 @@
     S.selHide = null; S.selGuess = null;
     if (reset) S.stats = {};
     hideModal();
+    hideTableOverlay();
 
     send('start_round', {
       roster: roster, names: names, coins: coins, saved: saved,
@@ -440,7 +441,7 @@
     renderAll();
     toast(finalDuel
       ? icon('zap') + ' ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
-      : icon('coins') + ' Ronda ' + S.game.round + ': esconde tus monedas');
+      : '🪙 Ronda ' + S.game.round + ': esconde tus monedas');
     if (S.local) scheduleAiHides();
   }
 
@@ -495,7 +496,16 @@
     var pr = presentIds();
     S.host.idx++;
     while (S.host.idx < S.host.order.length && !pr[S.host.order[S.host.idx]]) S.host.idx++;
-    if (S.host.idx >= S.host.order.length) { finishRound(); return; }
+    if (S.host.idx >= S.host.order.length) {
+      // Todos anunciaron: se deja ver el último bocadillo y se espera
+      // 1,5s antes de anunciar el resultado en la mesa.
+      var round = g.round;
+      setTimeout(function () {
+        if (!S.game || !S.host || S.game.round !== round || S.game.state !== 'guessing') return;
+        finishRound();
+      }, 1500);
+      return;
+    }
     var next = S.host.order[S.host.idx];
     g.turnId = next;
     send('guess_turn', { playerId: next });
@@ -579,11 +589,12 @@
     S.selHide = null; S.selGuess = null;
     if (p.round === 1) S.stats = {}; // partida nueva: estadísticas a cero
     hideModal();
+    hideTableOverlay();
     showScreen('game');
     renderAll();
     toast(p.finalDuel
       ? icon('zap') + ' ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
-      : icon('coins') + ' Ronda ' + p.round + ': esconde tus monedas');
+      : '🪙 Ronda ' + p.round + ': esconde tus monedas');
     if (S.local) scheduleAiHides();
   }
 
@@ -629,6 +640,14 @@
     S.game.lastReveal = p;
     trackStats(p);
     renderAll();
+    // 2s después del resultado, anuncio grande de quién se salva.
+    if (p.newlySaved && p.newlySaved.length) {
+      var ids = p.newlySaved.slice(), round = S.game.round;
+      setTimeout(function () {
+        if (!S.game || S.game.state !== 'reveal' || S.game.round !== round) return;
+        showTableOverlay(ids, '¡Salvado!', '');
+      }, 2000);
+    }
   }
 
   function onGameOver(p) {
@@ -642,7 +661,24 @@
     S.game.lastGameOver = p;
     trackStats(p); // la ronda final no pasa por onReveal
     renderAll();
-    showGameOverModal(p);
+    hideTableOverlay();
+    // Final dramático: primero el pringado en grande, luego el modal.
+    if (p.loserId) {
+      var loser = p.loserId;
+      setTimeout(function () {
+        if (!S.game || S.game.state !== 'gameOver') return;
+        showTableOverlay([loser], '¡Pringado!', 'pringado');
+      }, 1500);
+      setTimeout(function () {
+        if (!S.game || S.game.state !== 'gameOver') return;
+        showGameOverModal(p);
+      }, 4300);
+    } else {
+      setTimeout(function () {
+        if (!S.game || S.game.state !== 'gameOver') return;
+        showGameOverModal(p);
+      }, 1500);
+    }
   }
 
   // Estadísticas de la partida (las calcula cada cliente con lo que ve por la sala).
@@ -665,6 +701,7 @@
   function onRoundAbort(p) {
     if (!S.game) return;
     hideModal();
+    hideTableOverlay();
     renderAll();
     toast(p.reason || 'Ronda anulada.', 4000);
   }
@@ -868,6 +905,28 @@
     S.builtSeatsKey = seatKey();
   }
 
+  // Anuncio grande encima de la mesa (quién se salva / quién pringa),
+  // para que lo vea toda la mesa. No bloquea: se esconde solo.
+  function showTableOverlay(ids, tagText, tagClass) {
+    var ov = $('saved-overlay');
+    ov.innerHTML = '';
+    ids.forEach(function (id) {
+      var item = el('div', null, 'saved-star' + (tagClass ? ' ' + tagClass : ''));
+      var av = el('div', null, 'avatar big');
+      var photo = playerPhoto(id);
+      if (photo) av.style.backgroundImage = 'url("' + photo + '")';
+      else if (isAI(id)) av.innerHTML = icon('bot');
+      else av.textContent = (playerName(id) || '?').charAt(0).toUpperCase();
+      item.appendChild(av);
+      item.appendChild(el('div', playerName(id), 'saved-name'));
+      item.appendChild(el('div', tagText, 'saved-tag' + (tagClass ? ' ' + tagClass : '')));
+      ov.appendChild(item);
+    });
+    ov.classList.remove('hidden');
+    setTimeout(function () { ov.classList.add('hidden'); }, 2700);
+  }
+  function hideTableOverlay() { $('saved-overlay').classList.add('hidden'); }
+
   function renderMesa() {
     var g = S.game;
     if (!g) return;
@@ -888,7 +947,7 @@
       if (savedP && id === S.playerId) html = '<span class="est-check">' + icon('check') + '</span>';
       else if (g.state === 'hiding') html = '<span class="est-fist">' + ((id === S.playerId && g.myHide !== null) ? icon('fist') : icon('think')) + '</span>';
       else if (g.state === 'guessing' && active) html = '<span class="est-target">' + icon('target') + '</span>';
-      else if (g.state === 'reveal' && g.lastReveal) html = '<span class="est-coins">' + icon('coins') + '</span> <b>' + (g.lastReveal.hides[id] || 0) + '</b>';
+      else if (g.state === 'reveal' && g.lastReveal) html = '🪙 <b>' + (g.lastReveal.hides[id] || 0) + '</b>';
       else if (g.finalDuel && inR && g.state !== 'reveal') html = '<span class="est-target">' + icon('target') + '</span> <b>' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + '</b>';
       st.estado.innerHTML = html;
     });
@@ -962,7 +1021,7 @@
       var li = el('li');
       li.appendChild(el('span', playerName(id) + (id === S.playerId ? ' (tú)' : '')));
       var right = el('span');
-      right.innerHTML = (g.finalDuel ? icon('target') + ' ' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + ' ' : '') + icon('coins');
+      right.innerHTML = (g.finalDuel ? icon('target') + ' ' + (g.hits[id] || 0) + '/' + L.FINAL_HITS_TO_WIN + ' ' : '') + '🪙';
       li.appendChild(right);
       ul.appendChild(li);
     });
