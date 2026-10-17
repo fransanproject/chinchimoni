@@ -110,9 +110,12 @@ i[data-icon] .ic { width: 1.3em; height: 1.3em; vertical-align: -0.3em; }
 .game-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 
 /* Mesa redonda persistente: los jugadores siempre visibles alrededor */
-#mesa-wrap { position: relative; width: 100%; max-width: 600px; aspect-ratio: 1; margin: 0 auto; }
+html, body { overscroll-behavior: none; }
+/* En la partida el swipe vertical no mueve la página (salvo en el teclado, que sí puede desplazarse) */
+#screen-game button { touch-action: manipulation; }
+#mesa-wrap { position: relative; width: 100%; max-width: 680px; aspect-ratio: 1; margin: 0 auto; -webkit-user-select: none; user-select: none; }
 #mesa {
-  position: absolute; left: 21%; top: 21%; width: 58%; height: 58%;
+  position: absolute; left: 16%; top: 16%; width: 68%; height: 68%;
   border-radius: 50%;
   background: radial-gradient(circle at 50% 38%, #3d6b4f 0%, #1d4a2f 65%, #123522 100%);
   border: 7px solid #6b4a2f;

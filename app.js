@@ -94,6 +94,11 @@
       $('screen-' + s).classList.toggle('hidden', s !== name);
     });
   }
+  // En la partida, el swipe vertical no mueve la página (en móvil es incómodo);
+  // solo el teclado numérico conserva su desplazamiento interno.
+  document.getElementById('screen-game').addEventListener('touchmove', function (e) {
+    if (!e.target.closest || !e.target.closest('.numpad')) e.preventDefault();
+  }, { passive: false });
   var toastTimer = null;
   function toast(html, ms) {
     var t = $('toast');
