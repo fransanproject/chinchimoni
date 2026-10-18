@@ -44,7 +44,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  var PROTO_V = 8; // versión de la app: si no coincide con version.txt, hay que actualizar
+  var PROTO_V = 9; // versión de la app: si no coincide con version.txt, hay que actualizar
   function makeRoomCode() {
     var c = '';
     for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
@@ -1099,17 +1099,18 @@
   }
 
   function buildRanking(p) {
-    // Orden por salvación: el primero en salvarse, primero en el ranking.
-    // (El pringado va aparte, no en la lista.)
+    // Orden: el primero en salvarse, primero en el ranking (con corona).
+    // El ganador del duelo va de penúltimo (es el mejor de los que no se salvaron antes).
+    // El pringado va aparte, no en la lista.
     var order = [];
-    function push(id) { if (id && id !== p.loserId && order.indexOf(id) === -1) order.push(id); }
+    function push(id) { if (id && id !== p.loserId && id !== p.winnerId && order.indexOf(id) === -1) order.push(id); }
     var savedSorted = (p.saved || []).slice().sort(function (a, b) {
       var ra = (S.stats[a] && S.stats[a].rondaSalvado) || 99;
       var rb = (S.stats[b] && S.stats[b].rondaSalvado) || 99;
       return ra - rb;
     });
-    if (p.finalDuel && p.winnerId) push(p.winnerId);
     savedSorted.forEach(push);
+    if (p.finalDuel && p.winnerId && p.winnerId !== p.loserId) order.push(p.winnerId);
     return order;
   }
 
