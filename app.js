@@ -44,7 +44,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  var PROTO_V = 9; // versión de la app: si no coincide con version.txt, hay que actualizar
+  var PROTO_V = 10; // versión de la app: si no coincide con version.txt, hay que actualizar
   function makeRoomCode() {
     var c = '';
     for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
@@ -1155,13 +1155,16 @@
       h3.style.textAlign = 'center';
       wrap.appendChild(h3);
     }
-    // Clasificación: por orden de salvación; el 1º con corona de oro y laureles.
+    // Clasificación: por orden de salvación.
+    // La corona y los laureles son solo para el primero salvado en fase normal,
+    // nunca para el ganador del duelo.
     wrap.appendChild(el('h3', 'Clasificación', 'rank-title'));
     var rankList = el('div', null, 'rank-list');
     buildRanking(p).forEach(function (id, i) {
-      var row = el('div', null, 'rank-row' + (i === 0 ? ' champion' : ''));
+      var isChamp = (i === 0) && S.stats[id] && S.stats[id].rondaSalvado;
+      var row = el('div', null, 'rank-row' + (isChamp ? ' champion' : ''));
       var box = el('div');
-      if (i === 0) {
+      if (isChamp) {
         row.appendChild(el('span', '👑', 'rank-crown'));
         var champ = el('div', null, 'rank-champ-name');
         var l1 = el('span', null, 'laurel'); l1.innerHTML = icon('laurels');
