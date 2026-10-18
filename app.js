@@ -44,7 +44,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  var PROTO_V = 7; // versión del protocolo: si no coincide, hay que recargar la página
+  var PROTO_V = 8; // versión de la app: si no coincide con version.txt, hay que actualizar
   function makeRoomCode() {
     var c = '';
     for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
@@ -377,6 +377,7 @@
       var nm = el('span');
       nm.innerHTML = (i === 0 ? icon('crown') + ' ' : '') + escapeHtml(p.name);
       li.appendChild(nm);
+      if (p.v !== PROTO_V) li.appendChild(el('span', ' ⚠️ versión antigua', 'outdated-flag'));
       if (p.id === S.playerId) li.appendChild(el('span', '(tú)', 'muted'));
       ul.appendChild(li);
     });
@@ -387,7 +388,7 @@
     var note = $('lobby-note');
     var outdated = S.players.some(function (p) { return p.v !== PROTO_V; });
     if (outdated) {
-      note.innerHTML = '⚠️ Alguien tiene una versión antigua del juego: que cierre y vuelva a abrir el enlace.';
+      note.innerHTML = '⚠️ Los marcados con ⚠️ tienen una versión antigua: que abran el enlace nuevo (?v=' + PROTO_V + ').';
     } else if (S.players.length >= L.MAX_PLAYERS) {
       note.textContent = 'Sala llena: quien entre ahora mirará hasta la próxima ronda.';
     } else {
@@ -1193,33 +1194,45 @@
   }
 
   // ---------- actualización automática ----------
-  // Comprueba si hay una versión nueva publicada; si la hay, ofrece actualizar
-  // (los móviles guardan la vieja en caché y si no, las versiones no coinciden).
-  function checkForUpdate() {
+  // Comprueba si hay una versión nueva publicada. Al entrar, salta sola a
+  // ?v=nueva para burlar la caché del navegador/móvil (una vez por versión);
+  // a mitad de partida solo muestra el aviso con botón manual.
+  function goToVersion(v) {
+    var url = new URL(location.href);
+    url.searchParams.set('v', String(v));
+    location.href = url.toString();
+  }
+  function checkForUpdate(auto) {
     if (!window.fetch) return;
     fetch('version.txt?v=' + Date.now(), { cache: 'no-store' }).then(function (r) {
       return r.ok ? r.text() : null;
     }).then(function (txt) {
       var v = txt ? parseInt(txt.trim(), 10) : 0;
-      if (v && v !== PROTO_V) showUpdateBanner(v);
+      if (!v || v === PROTO_V) return;
+      showUpdateBanner(v);
+      if (auto) {
+        var key = 'chinchimoni_redirected_' + v, done = false;
+        try { done = !!sessionStorage.getItem(key); } catch (e) {}
+        if (!done) {
+          try { sessionStorage.setItem(key, '1'); } catch (e) {}
+          setTimeout(function () { goToVersion(v); }, 1500);
+        }
+      }
     }).catch(function () {});
   }
   function showUpdateBanner(v) {
     if ($('update-banner')) return;
     var b = el('div', null, 'update-banner');
     b.id = 'update-banner';
-    b.innerHTML = '<span>Hay una nueva versión del juego (' + v + ').</span> ';
-    var btn = el('button', 'Actualizar', 'btn-small');
-    btn.onclick = function () {
-      // Cambiar la URL burla la caché del navegador/móvil.
-      location.href = location.pathname + '?v=' + v;
-    };
+    b.innerHTML = '<span>⚠️ Tienes una versión antigua del juego (la ' + PROTO_V + '); la actual es la ' + v + '.</span> ';
+    var btn = el('button', 'Actualizar ahora', 'btn-small');
+    btn.onclick = function () { goToVersion(v); };
     b.appendChild(btn);
     document.body.insertBefore(b, document.body.firstChild);
   }
 
   // ---------- arranque ----------
-  checkForUpdate();
-  setInterval(checkForUpdate, 60000); // re-comprueba cada minuto en el lobby
+  checkForUpdate(true); // al entrar: se actualiza sola si hay versión nueva
+  setInterval(function () { checkForUpdate(false); }, 60000); // en partida: solo avisa
   showScreen('home');
 })();
