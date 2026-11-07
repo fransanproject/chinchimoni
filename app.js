@@ -54,7 +54,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  var PROTO_V = 11; // versión de la app: si no coincide con version.txt, hay que actualizar
+  var PROTO_V = 12; // versión de la app: si no coincide con version.txt, hay que actualizar
   function makeRoomCode() {
     var c = '';
     for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
@@ -665,6 +665,9 @@
 
   // ---------- ronda (anfitrión / local) ----------
   function hostStartRound(reset) {
+    // Si había un avance automático del duelo pendiente, se cancela:
+    // el avance manual (o este mismo arranque) manda.
+    if (S.duelAutoTimer) { clearTimeout(S.duelAutoTimer); S.duelAutoTimer = null; }
     var present = S.players.slice(0, L.MAX_PLAYERS);
     var prevSaved = (S.game && S.game.saved) || [];
     var prevStarter = S.game && S.game.starterId;
@@ -917,6 +920,18 @@
         if (!S.game || S.game.state !== 'reveal' || S.game.round !== round) return;
         showTableOverlay(ids, '¡Salvado!', '');
       }, 2000);
+    }
+    // Duelo: la siguiente ronda empieza sola 3 s después del resultado,
+    // sin esperar a que el anfitrión pulse «Siguiente ronda» (el botón
+    // queda como atajo para adelantarla). Solo lo programa el anfitrión.
+    if (p.duelContinues && S.isHost) {
+      var dr = S.game.round;
+      if (S.duelAutoTimer) clearTimeout(S.duelAutoTimer);
+      S.duelAutoTimer = setTimeout(function () {
+        S.duelAutoTimer = null;
+        if (!S.isHost || !S.game || S.game.state !== 'reveal' || S.game.round !== dr) return;
+        hostStartRound(false);
+      }, 3000);
     }
   }
 

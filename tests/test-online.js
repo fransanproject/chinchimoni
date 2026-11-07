@@ -302,6 +302,11 @@ try {
   // En el duelo no hay anuncio de salvado (nadie se salva aún)
   pumpAll();
   ok(A.$('saved-overlay').classList.contains('hidden'), 'sin anuncio de salvado en el duelo');
+  // Avance automático del duelo: sin pulsar nada, la siguiente ronda
+  // de duelo empieza sola (3 s tras el resultado).
+  pumpAll();
+  ok(/Escondiendo/.test(deepText(A.$('mesa-centro'))), 'A (salvada) ve que el duelo sigue escondiendo solo');
+  ok(/Esconde/.test(deepText(B.$('mesa-centro'))), 'B ve la fase de esconder en la ronda automática');
 
   // Código sin sala: aviso claro, sin sala fantasma ni autopromoción.
   const D = newClient('Dani');
