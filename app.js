@@ -11,15 +11,23 @@
  *  - Con 2 jugadores: DUELO FINAL, el primero en acertar 3 rondas
  *    se salva; el otro es el pringado.
  *
- * Online: sin servidor propio; el anfitrión arbitra y los eventos
- * viajan por Supabase Realtime (canal `chinchimoni-XXXX`).
+ * Online: SIN servidor propio ni proyecto externo. La sala la lleva
+ * EL ANFITRIÓN: el móvil que crea la sala es el servidor de la
+ * partida — mantiene la lista de jugadores, reparte el inicio y
+ * retransmite los eventos — y los demás móviles se conectan
+ * DIRECTAMENTE al suyo por WebRTC (PeerJS). El único servicio
+ * externo es el «punto de encuentro» público y gratuito de PeerJS
+ * (0.peerjs.com), que solo pone en contacto a los móviles al entrar:
+ * no guarda partidas, no necesita cuenta ni proyecto, y durante la
+ * partida los datos van de móvil a móvil sin pasar por ningún servidor.
+ * (Antes las salas iban por Supabase Realtime; desde la v11 ya no se
+ * usa Supabase para nada: fuera librería, URL y clave.)
  * En solitario: partida local contra la IA, sin red.
  * ============================================================ */
 (function () {
   'use strict';
 
-  var SB_URL = 'https://zjcthmglltdrefwnflqm.supabase.co';
-  var SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqY3RobWdsbHRkcmVmd25mbHFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwODA5OTMsImV4cCI6MjEwNzY1Njk5M30.hWorZSMT1C5dMVXYAaR2_fuduVwit4uJ9qrPGXcBk7o';
+  var PEER_HOST_PREFIX = 'chinchimoni-'; // el anfitrión se anuncia como chinchimoni-XXXX
 
   var L = Chinchimoni;
   var AI_NAMES = ['Ada', 'Turing', 'Pepe Bot', 'Lola Bot', 'Curro Bot'];
@@ -27,7 +35,9 @@
   // ---------- estado ----------
   var S = {
     name: '', playerId: '', joinedAt: 0, roomCode: '', photo: null,
-    channel: null, sb: null, local: false,
+    peer: null, hostConn: null, conns: {}, peerId: '', connected: false,
+    seenStarts: {}, netRetries: 0, netTimer: null, netWatchdog: null,
+    local: false,
     isHost: false, players: [],
     screen: 'home',
     selHide: null, selGuess: null, soloCount: 3,
@@ -44,7 +54,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  var PROTO_V = 10; // versión de la app: si no coincide con version.txt, hay que actualizar
+  var PROTO_V = 11; // versión de la app: si no coincide con version.txt, hay que actualizar
   function makeRoomCode() {
     var c = '';
     for (var i = 0; i < 4; i++) c += Math.floor(Math.random() * 10);
@@ -114,8 +124,25 @@
     $('modal').classList.remove('hidden');
   }
   function hideModal() { $('modal').classList.add('hidden'); }
+  // Enviar un evento: el anfitrión lo reparte a todos los invitados;
+  // un invitado se lo manda al anfitrión, que lo aplica y lo retransmite
+  // a los demás. En solitario no hay red: no hace nada.
   function send(type, payload) {
-    if (S.channel) S.channel.send({ type: 'broadcast', event: type, payload: payload });
+    var msg = { type: type, payload: payload || {} };
+    if (S.local) return;
+    if (S.isHost) netBroadcast(msg, null);
+    else if (S.hostConn && S.hostConn.open) { try { S.hostConn.send(msg); } catch (e) {} }
+  }
+  function netBroadcast(msg, exceptPeerId) {
+    Object.keys(S.conns).forEach(function (pid) {
+      if (pid === exceptPeerId) return;
+      var c = S.conns[pid];
+      if (c && c.open) { try { c.send(msg); } catch (e) {} }
+    });
+  }
+  function netSendTo(peerId, msg) {
+    var c = S.conns[peerId];
+    if (c && c.open) { try { c.send(msg); } catch (e) {} }
   }
   function presentIds() {
     var m = {};
@@ -148,7 +175,7 @@
     var n = $('input-name').value.trim().slice(0, 12);
     if (!n) { $('home-error').textContent = 'Escribe tu nombre primero.'; return; }
     try { localStorage.setItem('chinchimoni-name', n); } catch (e) {}
-    joinRoom(makeRoomCode(), n);
+    joinRoom(makeRoomCode(), n, true);
   });
   $('btn-join').addEventListener('click', function () {
     var n = $('input-name').value.trim().slice(0, 12);
@@ -156,7 +183,7 @@
     try { localStorage.setItem('chinchimoni-name', n); } catch (e) {}
     var code = $('input-code').value.trim();
     if (!/^[0-9]{4}$/.test(code)) { $('home-error').textContent = 'El código tiene 4 números.'; return; }
-    joinRoom(code, n);
+    joinRoom(code, n, false);
   });
   // --- modo en solitario ---
   $('btn-solo').addEventListener('click', function () {
@@ -243,7 +270,7 @@
     S.roomCode = 'SOLO';
     S.local = true;
     S.isHost = true;
-    S.channel = null;
+    S.peer = null; S.hostConn = null; S.conns = {};
     S.players = [{ id: 'humano', name: name, joinedAt: 0, photo: S.photo }];
     for (var i = 0; i < nAI; i++) {
       S.players.push({ id: 'ai-' + i, name: AI_NAMES[i % AI_NAMES.length], joinedAt: i + 1 });
@@ -253,55 +280,215 @@
     hostStartRound(true);
   }
 
-  // ---------- conexión a la sala (online) ----------
-  function joinRoom(code, name) {
+  // ---------- conexión a la sala (online, PeerJS / WebRTC) ----------
+  // El anfitrión ES el servidor: su móvil mantiene la lista de
+  // jugadores y retransmite los eventos. Los invitados se conectan
+  // DIRECTAMENTE a su móvil por WebRTC; PeerJS solo los pone en
+  // contacto al entrar (punto de encuentro público 0.peerjs.com).
+  function hostPeerId(code) { return PEER_HOST_PREFIX + String(code).toLowerCase(); }
+  // La identidad de cada jugador online ES su id de PeerJS: el roster,
+  // inRoster(), esconder y adivinar usan todos S.playerId, así que
+  // S.playerId se actualiza al id real del peer en cuanto se abre.
+  function selfPlayerEntry() {
+    return { id: S.playerId, name: S.name, joinedAt: S.joinedAt, photo: S.photo, v: PROTO_V, host: S.isHost };
+  }
+  // La librería PeerJS llega por CDN: si la fuente principal falla,
+  // se intenta una segunda fuente de la MISMA librería y se espera
+  // a que esté antes de dar un error.
+  var peerFallbackTried = false;
+  function ensurePeer(cb) {
+    var done = false;
+    function finish(ok) { if (done) return; done = true; cb(ok); }
+    if (window.Peer) { finish(true); return; }
+    if (!peerFallbackTried) {
+      peerFallbackTried = true;
+      try {
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/peerjs@1/dist/peerjs.min.js';
+        s.onload = function () { ensurePeer(finish); };
+        s.onerror = function () { ensurePeer(finish); };
+        document.head.appendChild(s);
+      } catch (e) {}
+    }
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      if (window.Peer) { clearInterval(iv); finish(true); }
+      else if (tries >= 40) { clearInterval(iv); finish(false); } // ~8 s esperando la librería
+    }, 200);
+  }
+
+  function joinRoom(code, name, asHost, isRetry) {
+    if (!isRetry) { S.netRetries = 0; }
     $('home-error').textContent = '';
     S.name = name;
     S.playerId = randId();
     S.joinedAt = Date.now();
     S.roomCode = code;
     S.local = false;
-    S.isHost = false;
+    S.isHost = !!asHost;
     S.players = [];
     S.game = null;
     S.host = null;
-
-    if (!window.supabase || !window.supabase.createClient) {
-      $('home-error').textContent = 'No se pudo cargar la librería de red. Revisa tu conexión.';
-      return;
-    }
-    if (!S.sb) S.sb = window.supabase.createClient(SB_URL, SB_ANON_KEY);
-    var ch = S.sb.channel('chinchimoni-' + code.toLowerCase(), {
-      config: { broadcast: { self: false }, presence: { key: S.playerId } }
-    });
-    S.channel = ch;
-
-    ch.on('presence', { event: 'sync' }, onPresenceSync);
-    ch.on('broadcast', { event: 'start_round' }, onStartRound);
-    ch.on('broadcast', { event: 'hide' }, onHide);
-    ch.on('broadcast', { event: 'hide_progress' }, onHideProgress);
-    ch.on('broadcast', { event: 'guessing_start' }, onGuessingStart);
-    ch.on('broadcast', { event: 'guess_turn' }, onGuessTurn);
-    ch.on('broadcast', { event: 'guess' }, onGuess);
-    ch.on('broadcast', { event: 'reveal' }, onReveal);
-    ch.on('broadcast', { event: 'game_over' }, onGameOver);
-    ch.on('broadcast', { event: 'round_abort' }, onRoundAbort);
-
-    ch.subscribe(function (status) {
-      if (status === 'SUBSCRIBED') {
-        ch.track({ name: S.name, joinedAt: S.joinedAt, photo: S.photo, v: PROTO_V });
-        showScreen('lobby');
-        renderLobby();
-      } else if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-        $('home-error').textContent = 'No se pudo conectar a la sala. Revisa tu conexión e inténtalo de nuevo.';
+    S.seenStarts = {};
+    S.connected = false;
+    // Vestíbulo optimista: te ves dentro desde el primer segundo,
+    // aunque la conexión aún se esté abriendo.
+    S.players = [selfPlayerEntry()];
+    showScreen('lobby');
+    renderLobby();
+    $('lobby-note').textContent = asHost ? 'Creando tu sala ' + code + '…' : 'Buscando la sala ' + code + '…';
+    ensurePeer(function (ok) {
+      if (!ok) {
+        $('home-error').textContent = 'No se pudo cargar la conexión online (la librería de red no ha llegado). Revisa tu internet y vuelve a intentarlo.';
+        showScreen('home');
+        return;
       }
+      teardownPeer();
+      if (asHost) createHostPeer(code);
+      else createGuestPeer(code);
     });
   }
 
+  function scheduleRoomRetry() {
+    if (!S.roomCode || S.local) return;
+    S.netRetries++;
+    if (S.netRetries > 3) {
+      $('home-error').textContent = 'No se pudo conectar con la sala tras varios intentos. Revisa tu conexión e inténtalo de nuevo.';
+      showScreen('home');
+      return;
+    }
+    if (S.netTimer) clearTimeout(S.netTimer);
+    S.netTimer = setTimeout(function () {
+      S.netTimer = null;
+      joinRoom(S.roomCode, S.name, S.isHost, true);
+    }, Math.min(1500 * S.netRetries, 6000));
+  }
+
+  function createHostPeer(code) {
+    var peer;
+    try { peer = new window.Peer(hostPeerId(code)); }
+    catch (e) { scheduleRoomRetry(); return; }
+    S.peer = peer;
+    peer.on('open', function (id) {
+      if (peer !== S.peer) return;
+      S.peerId = id; S.playerId = id; S.connected = true; S.netRetries = 0;
+      S.players = [selfPlayerEntry()];
+      applyRoster(S.players);
+      $('lobby-note').textContent = 'Sala creada (1 de ' + L.MAX_PLAYERS + '). Tu móvil hace de servidor: déjalo con el juego abierto mientras jugáis.';
+    });
+    peer.on('connection', function (conn) {
+      if (peer !== S.peer) return;
+      if (conn.open) hostOnConnection(conn);
+      else conn.on('open', function () { if (peer === S.peer) hostOnConnection(conn); });
+    });
+    peer.on('error', function (err) {
+      if (peer !== S.peer) return;
+      var type = (err && err.type) || '';
+      if (type === 'unavailable-id') {
+        // Ese código ya lo tiene otra sala abierta: se genera otro
+        // código y se crea la sala con él, sin molestar al anfitrión.
+        var newCode = makeRoomCode();
+        S.roomCode = newCode;
+        teardownPeer();
+        createHostPeer(newCode);
+        return;
+      }
+      S.connected = false;
+      scheduleRoomRetry();
+    });
+    peer.on('disconnected', function () {
+      if (peer !== S.peer) return;
+      try { peer.reconnect(); } catch (e) {}
+    });
+  }
+
+  function createGuestPeer(code) {
+    var peer;
+    try { peer = new window.Peer(); }
+    catch (e) { scheduleRoomRetry(); return; }
+    S.peer = peer;
+    peer.on('open', function (id) {
+      if (peer !== S.peer) return;
+      S.peerId = id; S.playerId = id;
+      var conn;
+      try { conn = peer.connect(hostPeerId(code), { reliable: true }); }
+      catch (e) { scheduleRoomRetry(); return; }
+      S.hostConn = conn;
+      // Si la sala no existe, la conexión nunca se abre: aviso claro
+      // en vez de quedarse esperando en una sala fantasma.
+      if (S.netWatchdog) clearTimeout(S.netWatchdog);
+      S.netWatchdog = setTimeout(function () {
+        S.netWatchdog = null;
+        if (!S.roomCode || S.isHost || S.connected) return;
+        noRoomFound();
+      }, 10000);
+      conn.on('open', function () {
+        if (peer !== S.peer) return;
+        S.connected = true; S.netRetries = 0;
+        if (S.netWatchdog) { clearTimeout(S.netWatchdog); S.netWatchdog = null; }
+        try { conn.send({ type: 'join', payload: selfPlayerEntry() }); } catch (e) {}
+        $('lobby-note').textContent = 'Conectado con el anfitrión. Esperando la lista de jugadores…';
+      });
+      conn.on('data', function (msg) { if (peer === S.peer) guestOnData(msg); });
+      conn.on('close', function () {
+        if (peer !== S.peer) return;
+        S.connected = false;
+        if (S.screen === 'game' && S.game) {
+          toast('Se ha perdido la conexión con el anfitrión (si cierra el juego, la sala se cierra).');
+          leaveRoom();
+        } else {
+          scheduleRoomRetry();
+        }
+      });
+      if (conn.on) conn.on('error', function () {
+        if (peer !== S.peer) return;
+        S.connected = false;
+        scheduleRoomRetry();
+      });
+    });
+    peer.on('error', function (err) {
+      if (peer !== S.peer) return;
+      var type = (err && err.type) || '';
+      if (type === 'peer-unavailable') {
+        if (S.netWatchdog) { clearTimeout(S.netWatchdog); S.netWatchdog = null; }
+        noRoomFound();
+        return;
+      }
+      S.connected = false;
+      scheduleRoomRetry();
+    });
+    peer.on('disconnected', function () {
+      if (peer !== S.peer) return;
+      try { peer.reconnect(); } catch (e) {}
+    });
+  }
+
+  function noRoomFound() {
+    var code = S.roomCode;
+    teardownPeer();
+    S.roomCode = '';
+    showScreen('home');
+    $('home-error').textContent = 'No se encuentra ninguna sala con el código ' + code + '. Comprueba que el anfitrión la ha creado ya (su móvil hace de servidor: tiene que tener el juego abierto en la sala).';
+  }
+
+  function teardownPeer() {
+    if (S.netTimer) { clearTimeout(S.netTimer); S.netTimer = null; }
+    if (S.netWatchdog) { clearTimeout(S.netWatchdog); S.netWatchdog = null; }
+    Object.keys(S.conns).forEach(function (pid) {
+      try { S.conns[pid].close(); } catch (e) {}
+    });
+    S.conns = {};
+    if (S.hostConn) { try { S.hostConn.close(); } catch (e) {} S.hostConn = null; }
+    if (S.peer) { try { S.peer.destroy(); } catch (e) {} S.peer = null; }
+    S.connected = false;
+  }
+
   function leaveRoom() {
-    if (S.channel) { try { S.channel.unsubscribe(); } catch (e) {} }
-    S.channel = null; S.game = null; S.host = null; S.players = [];
+    teardownPeer();
+    S.roomCode = ''; S.game = null; S.host = null; S.players = [];
     S.isHost = false; S.local = false; S.selHide = null; S.selGuess = null;
+    S.seenStarts = {};
     hideModal();
     hideTableOverlay();
     showScreen('home');
@@ -314,35 +501,108 @@
     else toast('Código: ' + code, 4000);
   });
 
-  // ---------- presence (online) ----------
-  function onPresenceSync() {
-    var state = S.channel.presenceState();
-    var players = [];
-    Object.keys(state).forEach(function (key) {
-      var pres = state[key];
-      if (pres && pres.length) players.push({ id: key, name: String(pres[0].name || '¿?').slice(0, 12), joinedAt: pres[0].joinedAt || 0, photo: pres[0].photo || null, v: pres[0].v || 0 });
-    });
-    players.sort(function (a, b) { return a.joinedAt - b.joinedAt; });
-    S.players = players;
-
-    var wasHost = S.isHost;
-    var hostId = players.length ? players[0].id : null;
-    S.isHost = (hostId === S.playerId);
-
+  // ---------- lista de jugadores (la manda el anfitrión) ----------
+  // La lista (roster) la lleva el anfitrión y es la misma para todos:
+  // [{id, name, joinedAt, photo, v, host}]. El primero es el anfitrión.
+  function applyRoster(list) {
+    if (!list || !list.length) return;
+    S.players = list.slice(0, L.MAX_PLAYERS);
     if (S.screen === 'lobby') renderLobby();
-    if (S.screen === 'game' && S.game) {
-      if (S.isHost && !wasHost) {
-        if (S.game.state === 'gameOver' && S.game.lastGameOver) {
-          send('game_over', S.game.lastGameOver);
-        } else {
-          send('round_abort', { reason: 'El anfitrión se desconectó. Nueva ronda.' });
-          hostStartRound(false);
-          return;
-        }
+    else if (S.screen === 'game' && S.game) renderAll();
+  }
+  function hostBroadcastRoster() {
+    netBroadcast({ type: 'roster', payload: { players: S.players } }, null);
+  }
+
+  // ---------- anfitrión: recibe a los invitados y lleva la sala ----------
+  function hostOnConnection(conn) {
+    S.conns[conn.peer] = conn;
+    conn.on('data', function (msg) { hostOnData(conn, msg); });
+    conn.on('close', function () { hostRemoveGuest(conn.peer); });
+    if (conn.on) conn.on('error', function () { hostRemoveGuest(conn.peer); });
+  }
+  function hostOnData(conn, msg) {
+    if (!msg || !msg.type) return;
+    var p = msg.payload || {};
+    if (msg.type === 'join') {
+      if (S.players.some(function (e) { return e.id === conn.peer; })) return;
+      if (S.players.length >= L.MAX_PLAYERS) {
+        try { conn.send({ type: 'full', payload: {} }); } catch (e) {}
+        setTimeout(function () { try { conn.close(); } catch (e) {} }, 600);
+        return;
       }
-      if (S.isHost) hostWatchdog();
-      renderAll();
+      S.players.push({
+        id: conn.peer, name: String(p.name || '¿?').slice(0, 12),
+        joinedAt: p.joinedAt || Date.now(), photo: p.photo || null,
+        v: p.v || 0, host: false
+      });
+      try { conn.send({ type: 'welcome', payload: { you: conn.peer } }); } catch (e) {}
+      applyRoster(S.players);
+      hostBroadcastRoster();
+      netSendTo(conn.peer, { type: 'roster', payload: { players: S.players } });
+    } else if (msg.type === 'hide') {
+      onHide(p);
+    } else if (msg.type === 'guess') {
+      // Primero se retransmite la apuesta a los demás invitados y
+      // luego el anfitrión la aplica (así el bocadillo llega antes
+      // de que avance el turno).
+      netBroadcast({ type: 'guess', payload: p }, conn.peer);
+      onGuess(p);
     }
+  }
+  function hostRemoveGuest(peerId) {
+    if (!S.isHost) return;
+    delete S.conns[peerId];
+    var before = S.players.length;
+    S.players = S.players.filter(function (e) { return e.id !== peerId; });
+    if (S.players.length !== before) {
+      applyRoster(S.players);
+      hostBroadcastRoster();
+      if (S.screen === 'game' && S.game) hostWatchdog();
+    }
+  }
+
+  // ---------- invitado: recibe órdenes y resultados del anfitrión ----------
+  function guestOnData(msg) {
+    if (!msg || !msg.type) return;
+    var p = msg.payload || {};
+    if (msg.type === 'roster') {
+      if (S.netWatchdog) { clearTimeout(S.netWatchdog); S.netWatchdog = null; }
+      applyRoster(p.players || []);
+    } else if (msg.type === 'welcome') {
+      S.connected = true;
+    } else if (msg.type === 'start_round') {
+      guestStartRound(p);
+    } else if (msg.type === 'hide_progress') {
+      onHideProgress(p);
+    } else if (msg.type === 'guessing_start') {
+      onGuessingStart(p);
+    } else if (msg.type === 'guess_turn') {
+      onGuessTurn(p);
+    } else if (msg.type === 'guess') {
+      onGuess(p);
+    } else if (msg.type === 'reveal') {
+      onReveal(p);
+    } else if (msg.type === 'game_over') {
+      onGameOver(p);
+    } else if (msg.type === 'round_abort') {
+      onRoundAbort(p);
+    } else if (msg.type === 'full') {
+      toast('Esta sala ya está llena: hay ' + L.MAX_PLAYERS + ' jugadores dentro.');
+      leaveRoom();
+    }
+  }
+  // El invitado aplica el inicio al recibirlo. El anfitrión lo reenvía
+  // una vez por si el primero se pierde: el nº de inicio descarta
+  // duplicados, y si el arranque es en el futuro se espera a ese
+  // instante para que todos empiecen a la vez (mismo startAt).
+  function guestStartRound(p) {
+    if (!p || !p.startId) { onStartRound(p); return; }
+    if (S.seenStarts[p.startId]) return;
+    S.seenStarts[p.startId] = true;
+    var delay = (p.startAt || 0) - Date.now();
+    if (delay > 0 && delay < 5000) setTimeout(function () { onStartRound(p); }, delay);
+    else onStartRound(p);
   }
 
   function hostWatchdog() {
@@ -392,7 +652,10 @@
     } else if (S.players.length >= L.MAX_PLAYERS) {
       note.textContent = 'Sala llena: quien entre ahora mirará hasta la próxima ronda.';
     } else {
-      note.innerHTML = 'Comparte el código con tus amigos. El primero en entrar es el anfitrión ' + icon('crown') + '.';
+      note.innerHTML = 'Comparte el código con tus amigos.';
+    }
+    if (S.isHost && !S.local) {
+      note.innerHTML += '<br>Tu móvil hace de servidor ' + icon('crown') + ': no cierres el juego mientras jugáis.';
     }
   }
   $('btn-start').addEventListener('click', function () {
@@ -428,32 +691,29 @@
     }
 
     S.host = { hides: {}, guesses: {}, order: [], idx: 0 };
-    S.game = {
-      roster: roster, names: names, coins: coins,
-      saved: saved, finalDuel: finalDuel, hits: hits,
-      round: (S.game && !reset) ? S.game.round + 1 : 1,
-      state: 'hiding', starterId: starterId, turnId: null,
-      maxTotal: L.maxTotal(coins),
-      myHide: null, hideDone: 0, hideTotal: roster.length,
-      guesses: {}, guessOrder: [],
-      lastReveal: null, lastGameOver: null, winnerId: null, loserId: null
-    };
-    S.selHide = null; S.selGuess = null;
-    if (reset) S.stats = {};
-    hideModal();
-    hideTableOverlay();
-
-    send('start_round', {
+    var roundNo = (S.game && !reset) ? S.game.round + 1 : 1;
+    var payload = {
       roster: roster, names: names, coins: coins, saved: saved,
       finalDuel: finalDuel, hits: hits,
-      round: S.game.round, starterId: starterId, maxTotal: S.game.maxTotal
-    });
-    showScreen('game');
-    renderAll();
-    toast(finalDuel
-      ? icon('zap') + ' ¡Duelo final! El primero en acertar ' + L.FINAL_HITS_TO_WIN + ' rondas se salva'
-      : '🪙 Ronda ' + S.game.round + ': esconde tus monedas');
-    if (S.local) scheduleAiHides();
+      round: roundNo, starterId: starterId, maxTotal: L.maxTotal(coins)
+    };
+    // Arranque sincronizado: todos aplican el inicio en el mismo
+    // instante (startAt). El anfitrión se lo aplica A SÍ MISMO en local
+    // además de emitirlo — nunca depende de que el mensaje le vuelva
+    // por la red — y lo reenvía una vez por si el primero se pierde;
+    // el nº de inicio (startId) descarta duplicados en los invitados.
+    if (S.local) {
+      payload.startId = 'solo-' + roundNo + '-' + Date.now();
+      payload.startAt = Date.now();
+      onStartRound(payload);
+      return;
+    }
+    payload.startAt = Date.now() + 900;
+    payload.startId = S.roomCode + '-' + roundNo + '-' + payload.startAt;
+    S.seenStarts[payload.startId] = true;
+    send('start_round', payload);
+    setTimeout(function () { if (S.isHost) send('start_round', payload); }, 1200);
+    setTimeout(function () { onStartRound(payload); }, 900);
   }
 
   function onHide(p) {
@@ -593,9 +853,8 @@
       maxTotal: p.maxTotal,
       myHide: null, hideDone: 0, hideTotal: p.roster.length,
       guesses: {}, guessOrder: [],
-      lastReveal: S.game ? S.game.lastReveal : null,
-      lastGameOver: S.game ? S.game.lastGameOver : null,
-      winnerId: null, loserId: null
+      lastReveal: null, lastGameOver: null,
+      winnerId: null, loserId: null, startAt: p.startAt || 0
     };
     S.selHide = null; S.selGuess = null;
     if (p.round === 1) S.stats = {}; // partida nueva: estadísticas a cero
@@ -1238,5 +1497,15 @@
   // ---------- arranque ----------
   checkForUpdate(true); // al entrar: se actualiza sola si hay versión nueva
   setInterval(function () { checkForUpdate(false); }, 60000); // en partida: solo avisa
+  // Al volver a la app (p. ej. tras compartir el código por WhatsApp),
+  // el móvil puede haber cortado la conexión: si estamos en una sala y
+  // la conexión cayó, se vuelve a entrar solo a la misma sala.
+  if (document.addEventListener) document.addEventListener('visibilitychange', function () {
+    if (document.hidden) return;
+    if (!S.local && S.roomCode && !S.connected && S.screen !== 'home') {
+      S.netRetries = 0;
+      joinRoom(S.roomCode, S.name, S.isHost, true);
+    }
+  });
   showScreen('home');
 })();

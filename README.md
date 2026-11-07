@@ -14,9 +14,9 @@ El juego de las monedas escondidas (los chinos), online con amigos o en solitari
 
 ## Cómo funciona
 
-- Sin servidor propio: el primer jugador en entrar es el **anfitrión** (arbitra la ronda).
-- Tiempo real con **Supabase Realtime** (canales Broadcast, sin tablas): solo viajan eventos diminutos.
-- Si el anfitrión se desconecta, el siguiente jugador toma el mando y la ronda se reinicia. Si alguien se desconecta a mitad de ronda, el juego sigue sin él.
+- Sin servidor propio ni proyecto externo: el **anfitrión** es el servidor de la partida en su propio móvil (mantiene la lista de jugadores, reparte el inicio y retransmite los eventos). Los demás se conectan directamente a él por WebRTC (PeerJS, punto de encuentro público 0.peerjs.com).
+- Solo viajan eventos diminutos entre móviles. Sin Supabase desde la v11.
+- Si el anfitrión cierra el juego, la sala se cierra: que no salga hasta que acabe la partida. Si alguien se desconecta a mitad de ronda, el juego sigue sin él.
 - Lo que escondes viaja etiquetado por la sala: entre amigos se juega con confianza (no mires la consola, tramposo).
 
 ## Archivos

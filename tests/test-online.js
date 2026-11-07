@@ -1,7 +1,11 @@
 // Test online simulado: 3 clientes (A anfitrión, B, C) conectados por un
-// canal falso que imita Supabase Realtime (broadcast con self:false + presence).
+// broker PeerJS falso en memoria (WebRTC de mentira: las conexiones
+// entregan los mensajes directamente, con 'open' asíncrono).
 // A se salva en la ronda 1 y mira la ronda 2 como espectador: debe ver TODAS
 // las apuestas en bocadillos y el total al resolver.
+// Además: el inicio llega a los invitados y entran en partida (no solo el
+// anfitrión), el reenvío del inicio no duplica la ronda, un código sin
+// sala avisa sin sala fantasma, y la sala llena (12) rechaza al 13º.
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
@@ -50,44 +54,64 @@ function makeEl(tag) {
   return e;
 }
 
-// ---- red falsa ----
-const netClients = [];
-function makeFakeSupabase() {
-  return {
-    createClient() {
-      return {
-        channel(name, opts) {
-          const ch = {
-            _handlers: {}, _presence: {},
-            _key: (opts && opts.config && opts.config.presence && opts.config.presence.key) || 'x',
-            on(type, filter, fn) {
-              (ch._handlers[filter.event] = ch._handlers[filter.event] || []).push(fn);
-              return ch;
-            },
-            send(msg) {
-              netClients.forEach(o => {
-                if (o.ch === ch) return; // self:false
-                (o.ch._handlers[msg.event] || []).forEach(fn => fn(msg.payload));
-              });
-            },
-            track(data) {
-              ch._presence[ch._key] = [data];
-              netClients.forEach(o => { (o.ch._handlers['sync'] || []).forEach(fn => fn()); });
-            },
-            presenceState() {
-              const st = {};
-              netClients.forEach(o => Object.assign(st, o.ch._presence));
-              return st;
-            },
-            subscribe(cb) { netClients.push({ ch }); cb('SUBSCRIBED'); return ch; }
-          };
-          return ch;
-        }
-      };
-    }
-  };
+// ---- red falsa: broker PeerJS en memoria ----
+// Los eventos 'open'/'connection'/'error' son asíncronos (cola deferred
+// que el test bombea); los mensajes de datos se entregan al instante,
+// como en una conexión WebRTC ya abierta.
+const deferred = [];
+function defer(fn) { deferred.push(fn); }
+function pumpDeferred() {
+  for (let round = 0; round < 10 && deferred.length; round++) {
+    deferred.splice(0).forEach(fn => fn());
+  }
 }
+const peerRegistry = {};
+let guestSeq = 0;
+function FakePeer(id) {
+  this.id = id || ('guest-' + (++guestSeq) + '-' + Math.random().toString(36).slice(2, 6));
+  this._handlers = {};
+  if (peerRegistry[this.id]) {
+    const self = this;
+    defer(function () { self._fire('error', { type: 'unavailable-id' }); });
+    return;
+  }
+  peerRegistry[this.id] = this;
+  const self = this;
+  defer(function () { self._fire('open', self.id); });
+}
+FakePeer.prototype.on = function (ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); return this; };
+FakePeer.prototype._fire = function (ev, arg) { (this._handlers[ev] || []).forEach(function (fn) { fn(arg); }); };
+FakePeer.prototype.connect = function (hostId) {
+  const host = peerRegistry[hostId];
+  const guestConn = new FakeConn(this, hostId);
+  const hostConn = new FakeConn(host, this.id);
+  guestConn._other = hostConn; hostConn._other = guestConn;
+  if (!host) {
+    const self = this;
+    defer(function () { self._fire('error', { type: 'peer-unavailable' }); });
+    return guestConn;
+  }
+  defer(function () {
+    host._fire('connection', hostConn);
+    hostConn.open = true; hostConn._fire('open');
+    guestConn.open = true; guestConn._fire('open');
+  });
+  return guestConn;
+};
+FakePeer.prototype.destroy = function () { delete peerRegistry[this.id]; };
+FakePeer.prototype.reconnect = function () {};
+function FakeConn(peer, remoteId) {
+  this.peer = remoteId; this.open = false; this._handlers = {}; this._other = null;
+}
+FakeConn.prototype.on = function (ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); return this; };
+FakeConn.prototype._fire = function (ev, arg) { (this._handlers[ev] || []).forEach(function (fn) { fn(arg); }); };
+FakeConn.prototype.send = function (msg) { if (this._other) this._other._fire('data', msg); };
+FakeConn.prototype.close = function () {
+  this.open = false; this._fire('close');
+  if (this._other) { this._other.open = false; this._other._fire('close'); }
+};
 
+const allClients = [];
 function newClient(name) {
   const byId = {};
   const timers = [];
@@ -104,8 +128,11 @@ function newClient(name) {
       getElementById(id) { return byId[id] || (byId[id] = makeEl('div#' + id)); },
       createElement(t) { return makeEl(t); },
       querySelectorAll() { return []; },
+      addEventListener() {},
+      head: makeEl('head'),
+      body: makeEl('body'),
     },
-    supabase: makeFakeSupabase(),
+    Peer: FakePeer,
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
@@ -123,8 +150,11 @@ function newClient(name) {
     batch.forEach(t => { t.dead = true; });
     batch.forEach(t => t.fn());
   };
-  return { doc, $, name, pumpOnce };
+  const client = { doc, $, name, pumpOnce };
+  allClients.push(client);
+  return client;
 }
+const pumpAll = () => { pumpDeferred(); allClients.forEach(c => c.pumpOnce()); pumpDeferred(); };
 
 function deepText(n) {
   let t = n.textContent || '';
@@ -189,6 +219,8 @@ function seatCountOf(client) {
   walk(client.$('mesa'), x => { if (hasClass(x, 'asiento')) n++; });
   return n;
 }
+function inGame(client) { return !hasClass(client.$('screen-game'), 'hidden'); }
+function onHome(client) { return !hasClass(client.$('screen-home'), 'hidden'); }
 
 let fails = 0;
 function ok(c, name) { if (!c) { fails++; console.error('FALLA:', name); } else console.log('ok:', name); }
@@ -197,18 +229,31 @@ try {
   const A = newClient('Ana');
   const B = newClient('Beto');
   const C = newClient('Carlos');
-  const pumpAll = () => { A.pumpOnce(); B.pumpOnce(); C.pumpOnce(); };
 
   // A crea sala, B y C se unen
   A.$('btn-create').fire('click');
+  pumpAll();
   const code = A.$('lobby-code').textContent;
   ok(/^[0-9]{4}$/.test(code), 'sala creada con código ' + code);
   B.$('input-code').value = code; B.$('btn-join').fire('click');
   C.$('input-code').value = code; C.$('btn-join').fire('click');
+  pumpAll();
   ok(B.$('lobby-players').children.length === 3, 'B ve 3 jugadores en el lobby');
+  ok(A.$('lobby-players').children.length === 3, 'A ve 3 jugadores en el lobby');
 
-  // A (anfitriona) empieza. Ronda 1: todos esconden 1 → total 3. A empieza y dice 3 → salvada.
+  // A (anfitriona) empieza. El inicio es sincronizado (startAt): hay que
+  // bombear para que se aplique en los tres. Los invitados DEBEN entrar
+  // en partida, no quedarse en la sala (el bug reportado).
   A.$('btn-start').fire('click');
+  pumpAll();
+  ok(inGame(A), 'A entra en partida al empezar');
+  ok(inGame(B), 'B entra en partida al empezar (no se queda en la sala)');
+  ok(inGame(C), 'C entra en partida al empezar (no se queda en la sala)');
+  ok(A.$('game-round').textContent === 'Ronda 1', 'A está en la ronda 1');
+  pumpAll(); // reenvío del inicio: no debe duplicar la ronda
+  ok(B.$('game-round').textContent === 'Ronda 1', 'el reenvío del inicio no duplica la ronda en B');
+
+  // Ronda 1: todos esconden 1 → total 3. A empieza y dice 3 → salvada.
   hideFor(A, 1); hideFor(B, 1); hideFor(C, 1);
   guessFor(A, 3); // ¡acierta! se salva
   guessFor(B, 0);
@@ -236,6 +281,8 @@ try {
   const next = findBtn(A, 'Siguiente ronda') || findBtn(A, 'Empezar el duelo');
   ok(!!next, 'la anfitriona puede avanzar al duelo');
   next.fire('click');
+  pumpAll(); // el inicio del duelo también es sincronizado
+  ok(inGame(B), 'B entra en el duelo al avanzar la anfitriona');
   ok(seatCountOf(A) === 3, 'A ve 3 asientos (ella + 2 duelistas): ' + seatCountOf(A));
 
   // Duelo, ronda 1: B esconde 2, C esconde 1 → total 3. Empieza B (rotación).
@@ -255,6 +302,32 @@ try {
   // En el duelo no hay anuncio de salvado (nadie se salva aún)
   pumpAll();
   ok(A.$('saved-overlay').classList.contains('hidden'), 'sin anuncio de salvado en el duelo');
+
+  // Código sin sala: aviso claro, sin sala fantasma ni autopromoción.
+  const D = newClient('Dani');
+  D.$('input-code').value = '9999'; D.$('btn-join').fire('click');
+  pumpAll();
+  ok(/No se encuentra ninguna sala/.test(D.$('home-error').textContent),
+    'código sin sala avisa: ' + D.$('home-error').textContent);
+  ok(onHome(D), 'D vuelve a la portada, sin sala fantasma');
+
+  // Sala llena: 12 jugadores dentro, el 13º es rechazado.
+  const H = newClient('Hugo');
+  H.$('btn-create').fire('click');
+  pumpAll();
+  const code2 = H.$('lobby-code').textContent;
+  ok(/^[0-9]{4}$/.test(code2), 'segunda sala creada con código ' + code2);
+  for (let i = 0; i < 11; i++) {
+    const g = newClient('Inv' + i);
+    g.$('input-code').value = code2; g.$('btn-join').fire('click');
+    pumpAll();
+  }
+  ok(H.$('lobby-players').children.length === 12, 'la sala se llena con 12 jugadores');
+  const extra = newClient('Extra');
+  extra.$('input-code').value = code2; extra.$('btn-join').fire('click');
+  pumpAll();
+  ok(onHome(extra), 'el 13º jugador es rechazado y vuelve a la portada');
+  ok(H.$('lobby-players').children.length === 12, 'la sala sigue con 12 tras el rechazo');
 } catch (e) {
   fails++;
   console.error('FALLA: excepción:', e.stack.split('\n').slice(0, 5).join('\n'));
